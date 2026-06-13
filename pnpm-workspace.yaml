@@ -1,0 +1,8 @@
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/google@3.0.82'
+  - '@ai-sdk/groq@3.0.41'
+  - '@ai-sdk/openai@3.0.71'
+  - '@ai-sdk/provider-utils@4.0.29'
