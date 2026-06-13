@@ -78,7 +78,7 @@ export function AppSidebar() {
                   return (
                     <SidebarMenuItem key={item.label}>
                       <SidebarMenuButton asChild>
-                        <Link href={item.href}>
+                        <Link href={item.href ?? "#"}>
                           <item.icon />
                           <span>{item.label}</span>
                         </Link>

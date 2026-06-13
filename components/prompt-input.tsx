@@ -21,7 +21,7 @@ const MAX_INPUT = 1000
 
 const modes: { value: PromptMode; label: string; color: string }[] = [
   { value: "plan", label: "Plan", color: "#FF8C00" },
-  { value: "build", label: "Build", color: "#0099FF" },
+  { value: "build", label: "Build", color: "#22C55E" },
   { value: "chat", label: "Chat", color: "#888" },
 ]
 

@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, PromptMode, AttachmentData, AIProvider } from "@/types"
+import type { Chat, Message, PromptMode, AttachmentData, AIProvider, ToolCallEvent } from "@/types"
 import { useTimelineStore } from "./timeline-store"
 import { useArtifactStore } from "./artifact-store"
 
@@ -53,7 +53,10 @@ export const useChatStore = create<ChatStore>()(
         return id
       },
 
-      setActiveChat: (id) => set({ activeChatId: id }),
+      setActiveChat: (id) => {
+        useTimelineStore.getState().clearEvents()
+        set({ activeChatId: id })
+      },
 
       sendMessage: async (chatId, content, attachments, model, provider) => {
         const chat = get().chats[chatId]
@@ -124,9 +127,7 @@ export const useChatStore = create<ChatStore>()(
             }),
           })
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`)
-          }
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
           const reader = response.body?.getReader()
           if (!reader) throw new Error("No response body")
@@ -167,12 +168,13 @@ export const useChatStore = create<ChatStore>()(
                           messages: c.messages.map((m) =>
                             m.id === assistantMessage.id
                               ? { ...m, content: m.content + text }
-                              : m,
+                              : m
                           ),
                         },
                       },
                     }
                   })
+
                 } else if (event.type === "clear") {
                   set((state) => {
                     const c = state.chats[chatId]
@@ -183,14 +185,13 @@ export const useChatStore = create<ChatStore>()(
                         [chatId]: {
                           ...c,
                           messages: c.messages.map((m) =>
-                            m.id === assistantMessage.id
-                              ? { ...m, content: "" }
-                              : m,
+                            m.id === assistantMessage.id ? { ...m, content: "" } : m
                           ),
                         },
                       },
                     }
                   })
+
                 } else if (event.type === "timeline_activity") {
                   const ev = event.data as Record<string, unknown>
                   if (ev?.title) {
@@ -204,6 +205,34 @@ export const useChatStore = create<ChatStore>()(
                       timestamp: (ev.timestamp as number) || Date.now(),
                     })
                   }
+
+                } else if (event.type === "tool_call") {
+                  // ── Upsert tool call into the assistant message in real-time ──
+                  const ev = event.data as ToolCallEvent
+                  set((state) => {
+                    const c = state.chats[chatId]
+                    if (!c) return state
+                    const lastMsg = c.messages[c.messages.length - 1]
+                    if (!lastMsg || lastMsg.role !== "assistant") return state
+                    const existing = lastMsg.toolCalls ?? []
+                    const existingIndex = existing.findIndex((e) => e.id === ev.id)
+                    const updated =
+                      existingIndex >= 0
+                        ? existing.map((e) => (e.id === ev.id ? { ...e, ...ev } : e))
+                        : [...existing, ev]
+                    return {
+                      chats: {
+                        ...state.chats,
+                        [chatId]: {
+                          ...c,
+                          messages: c.messages.map((m) =>
+                            m.id === lastMsg.id ? { ...m, toolCalls: updated } : m
+                          ),
+                        },
+                      },
+                    }
+                  })
+
                 } else if (event.type === "artifact_create") {
                   const art = event.data as Record<string, unknown>
                   if (art?.id && art?.title && art?.content) {
@@ -214,28 +243,45 @@ export const useChatStore = create<ChatStore>()(
                       content: art.content as string,
                     })
                   }
+
                 } else if (event.type === "final") {
-                  const text = (event.data?.text as string) || ""
-                  if (text) {
-                    set((state) => {
-                      const c = state.chats[chatId]
-                      if (!c) return state
-                      return {
-                        chats: {
-                          ...state.chats,
-                          [chatId]: {
-                            ...c,
-                            messages: c.messages.map((m) =>
-                              m.id === assistantMessage.id
-                                ? { ...m, content: text }
-                                : m,
-                            ),
-                          },
+                  const finalData = event.data as Record<string, unknown>
+                  const text = (finalData?.text as string) || ""
+                  const tlEvents = useTimelineStore.getState().events
+
+                  set((state) => {
+                    const c = state.chats[chatId]
+                    if (!c) return state
+
+                    // Find the current assistant message to preserve toolCalls already in it
+                    const currentMsg = c.messages.find((m) => m.id === assistantMessage.id)
+                    const existingToolCalls = currentMsg?.toolCalls
+
+                    return {
+                      chats: {
+                        ...state.chats,
+                        [chatId]: {
+                          ...c,
+                          messages: c.messages.map((m) =>
+                            m.id === assistantMessage.id
+                              ? {
+                                  ...m,
+                                  // Only set content if there's text (don't wipe streaming content)
+                                  ...(text ? { content: text } : {}),
+                                  // Preserve tool calls that were built up during streaming
+                                  ...(existingToolCalls?.length ? { toolCalls: existingToolCalls } : {}),
+                                  // Embed timeline events for plan mode persistence
+                                  ...(tlEvents.length > 0 ? { timelineEvents: tlEvents } : {}),
+                                  isStreaming: false,
+                                }
+                              : m
+                          ),
                         },
-                      }
-                    })
-                  }
+                      },
+                    }
+                  })
                   isDone = true
+
                 } else if (event.type === "error") {
                   const errMsg = (event.data?.message as string) || "Unknown error"
                   set((state) => {
@@ -249,7 +295,7 @@ export const useChatStore = create<ChatStore>()(
                           messages: c.messages.map((m) =>
                             m.id === assistantMessage.id
                               ? { ...m, content: errMsg, isStreaming: false }
-                              : m,
+                              : m
                           ),
                         },
                       },
@@ -275,7 +321,7 @@ export const useChatStore = create<ChatStore>()(
                   messages: c.messages.map((m) =>
                     m.id === assistantMessage.id
                       ? { ...m, content: errMsg, isStreaming: false }
-                      : m,
+                      : m
                   ),
                 },
               },
@@ -291,9 +337,7 @@ export const useChatStore = create<ChatStore>()(
                 [chatId]: {
                   ...c,
                   messages: c.messages.map((m) =>
-                    m.id === assistantMessage.id
-                      ? { ...m, isStreaming: false }
-                      : m,
+                    m.id === assistantMessage.id ? { ...m, isStreaming: false } : m
                   ),
                   updatedAt: Date.now(),
                 },
@@ -348,17 +392,22 @@ export const useChatStore = create<ChatStore>()(
       version: 6,
       migrate: (persisted: unknown, version: number) => {
         const raw = persisted as Record<string, unknown>
-        let state = (raw?.state as Record<string, unknown> | undefined) ?? raw
+        const state = (raw?.state as Record<string, unknown> | undefined) ?? raw
+        const s = state as Record<string, unknown> | undefined
         if (version < 1) {
-          const s = state as Record<string, unknown> | undefined
           if (s?.chats) {
             for (const chat of Object.values(s.chats) as Record<string, unknown>[]) {
-              if (!chat.provider) chat.provider = "backend"
+              if (!chat.provider) chat.provider = "opencode"
             }
+          }
+        }
+        if (s?.chats) {
+          for (const chat of Object.values(s.chats) as Record<string, unknown>[]) {
+            if (chat.provider === "backend") chat.provider = "opencode"
           }
         }
         return state as unknown as ChatStore
       },
-    },
-  ),
+    }
+  )
 )

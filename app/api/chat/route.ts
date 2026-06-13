@@ -28,13 +28,22 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder()
     const effectiveModel = modelId || getDefaultModel(provider)
 
+    // System prompt per mode
+    const systemPromptByMode: Record<string, string> = {
+      chat:
+        "You are NightCode, a friendly and helpful AI assistant. Be concise, warm, and direct. Keep responses natural and conversational.",
+      plan:
+        "You are NightCode in Plan Mode. You create structured planning documents, PRDs, architecture diagrams, and technical specs.",
+      build:
+        "You are NightCode in Build Mode. You have full access to the file system and shell. Execute tasks directly.",
+    }
+
     const stream = new ReadableStream({
       async start(controller) {
-        controller.enqueue(encoder.encode(sse("thinking_step", { text: "Thinking..." })))
         controller.enqueue(encoder.encode(sse("debug", { provider, model: effectiveModel })))
 
         let firstRealChunk = true
-        let planFinalSent = false
+        let finalSent = false
 
         try {
           await graph.invoke(
@@ -42,9 +51,7 @@ export async function POST(req: Request) {
               messages,
               model: effectiveModel,
               provider: provider as AIProvider,
-              systemPrompt:
-                "You are NightCode, a friendly and helpful AI assistant. Be concise, warm, and direct. " +
-                "Keep responses natural and conversational.",
+              systemPrompt: systemPromptByMode[mode] || systemPromptByMode.chat,
               response: "",
             },
             {
@@ -54,17 +61,19 @@ export async function POST(req: Request) {
                     const parsed = JSON.parse(chunk)
                     if (parsed?.type) {
                       if (parsed.type === "final") {
-                        planFinalSent = true
+                        finalSent = true
                       }
                       if (firstRealChunk) {
                         firstRealChunk = false
                         controller.enqueue(encoder.encode(sse("clear", {})))
                       }
+                      // Forward all typed events (timeline_activity, tool_call, artifact_create, final)
                       controller.enqueue(encoder.encode(sse(parsed.type, parsed.data)))
                       return
                     }
                   } catch {}
 
+                  // Plain text chunk (chat mode)
                   if (firstRealChunk) {
                     firstRealChunk = false
                     controller.enqueue(encoder.encode(sse("clear", {})))
@@ -75,7 +84,7 @@ export async function POST(req: Request) {
             }
           )
 
-          if (!planFinalSent) {
+          if (!finalSent) {
             controller.enqueue(encoder.encode(sse("final", { text: "" })))
           }
         } catch (err) {

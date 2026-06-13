@@ -130,10 +130,13 @@ function ActivityRow({
 
 export function AgentTimeline({
   isStreaming,
+  events: propEvents,
 }: {
   isStreaming?: boolean
+  events?: TimelineActivity[]
 }) {
-  const events = useTimelineStore((s) => s.events)
+  const globalEvents = useTimelineStore((s) => s.events)
+  const events = propEvents ?? globalEvents
   const [isOpen, setIsOpen] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 

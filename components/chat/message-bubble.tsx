@@ -8,6 +8,7 @@ import {
   AttachmentPreview,
 } from "@/components/ai-elements/attachments"
 import { AgentTimeline } from "./agent-timeline"
+import { BuildTimeline } from "./build-timeline"
 import { renderInlineMarkdown } from "@/lib/render-markdown"
 
 interface MessageBubbleProps {
@@ -48,7 +49,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         <div className="min-w-0 flex-1 pt-1.5">
           {message.mode === "plan" ? (
             <>
-              <AgentTimeline isStreaming={message.isStreaming} />
+              <AgentTimeline
+                isStreaming={message.isStreaming}
+                events={message.timelineEvents}
+              />
+              {message.content && (
+                <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
+                  {renderInlineMarkdown(message.content)}
+                </div>
+              )}
+            </>
+          ) : message.mode === "build" ? (
+            <>
+              <BuildTimeline
+                isStreaming={message.isStreaming}
+                events={message.toolCalls}
+              />
               {message.content && (
                 <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
                   {renderInlineMarkdown(message.content)}

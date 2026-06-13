@@ -1,7 +1,8 @@
 import { createOpenAI } from "@ai-sdk/openai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
+import { createGroq } from "@ai-sdk/groq"
 
-export type ProviderName = "openai" | "openrouter" | "google" | "opencode"
+export type ProviderName = "openai" | "openrouter" | "google" | "opencode" | "groq"
 
 const openrouter = createOpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -21,6 +22,10 @@ const google = createGoogleGenerativeAI({
   apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
 })
 
+const groq = createGroq({
+  apiKey: process.env.GROQ_API_KEY,
+})
+
 export function getModel(provider: ProviderName, modelId: string) {
   switch (provider) {
     case "openai":
@@ -31,6 +36,8 @@ export function getModel(provider: ProviderName, modelId: string) {
       return opencode.languageModel(modelId)
     case "google":
       return google.languageModel(modelId)
+    case "groq":
+      return groq.languageModel(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }

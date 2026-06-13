@@ -115,12 +115,10 @@ export function createPlanGraph() {
           messages: [
             {
               role: "system",
-              content:
-                "Analyze the user's request and produce a concise 1-paragraph understanding of what they need. Focus on the core deliverable. Output ONLY the analysis text, no extra commentary.",
+              content: `${state.systemPrompt}\n\nAnalyze the user's request and produce a concise 1-paragraph understanding of what they need. Focus on the core deliverable. Output ONLY the analysis text, no extra commentary.`,
             },
             ...state.messages,
           ],
-          systemPrompt: state.systemPrompt,
           onChunk: () => {},
         })
 
@@ -145,7 +143,7 @@ export function createPlanGraph() {
           messages: [
             {
               role: "system",
-              content: `You are a planning assistant. Return a JSON array of filenames to create.
+              content: `${state.systemPrompt}\n\nYou are a planning assistant. Return a JSON array of filenames to create.
 
 STRICT RULES:
 - Default: return EXACTLY 1 file unless the user explicitly asks for more
@@ -167,7 +165,6 @@ Analysis: ${state.analysis}`,
               content: `Analysis of request: ${state.analysis}\n\nWhat artifacts should be created?`,
             },
           ],
-          systemPrompt: state.systemPrompt,
           onChunk: () => {},
         })
 
@@ -308,7 +305,7 @@ Filename: ${name}`
           messages: [
             {
               role: "system",
-              content: `You are NightCode, a friendly and helpful assistant. Summarize the outcome naturally in 1-2 conversational sentences.
+              content: `${state.systemPrompt}\n\nSummarize the outcome naturally in 1-2 conversational sentences.
 
 The following artifacts were generated: ${names}
 
@@ -319,7 +316,6 @@ Write a warm, brief summary of what was accomplished. Don't list the files — j
               content: `Summarize the ${count} artifacts created for: ${state.analysis}`,
             },
           ],
-          systemPrompt: state.systemPrompt,
           onChunk: () => {},
         })
 
