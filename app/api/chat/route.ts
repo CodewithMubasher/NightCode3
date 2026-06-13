@@ -34,6 +34,7 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(sse("debug", { provider, model: effectiveModel })))
 
         let firstRealChunk = true
+        let planFinalSent = false
 
         try {
           await graph.invoke(
@@ -49,6 +50,21 @@ export async function POST(req: Request) {
             {
               configurable: {
                 onChunk: (chunk: string) => {
+                  try {
+                    const parsed = JSON.parse(chunk)
+                    if (parsed?.type) {
+                      if (parsed.type === "final") {
+                        planFinalSent = true
+                      }
+                      if (firstRealChunk) {
+                        firstRealChunk = false
+                        controller.enqueue(encoder.encode(sse("clear", {})))
+                      }
+                      controller.enqueue(encoder.encode(sse(parsed.type, parsed.data)))
+                      return
+                    }
+                  } catch {}
+
                   if (firstRealChunk) {
                     firstRealChunk = false
                     controller.enqueue(encoder.encode(sse("clear", {})))
@@ -59,7 +75,9 @@ export async function POST(req: Request) {
             }
           )
 
-          controller.enqueue(encoder.encode(sse("final", { text: "" })))
+          if (!planFinalSent) {
+            controller.enqueue(encoder.encode(sse("final", { text: "" })))
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Stream error"
           controller.enqueue(encoder.encode(sse("error", { message: `[${provider}] ${msg}` })))

@@ -7,6 +7,8 @@ import {
   Attachment,
   AttachmentPreview,
 } from "@/components/ai-elements/attachments"
+import { AgentTimeline } from "./agent-timeline"
+import { renderInlineMarkdown } from "@/lib/render-markdown"
 
 interface MessageBubbleProps {
   message: Message
@@ -29,7 +31,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               </Attachments>
             </div>
           )}
-          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-2.5 text-sm text-foreground">
+          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-2.5 text-base text-foreground">
             <p className="leading-relaxed">{message.content}</p>
           </div>
         </div>
@@ -40,13 +42,24 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div>
       <div className="flex items-start gap-3">
-        <div className="flex shrink-0 items-center justify-center pt-1">
-          <Eclipse size={20} style={{ color: "#0099ff" }} className={message.isStreaming ? "animate-spin" : ""} />
+        <div className="flex shrink-0 items-center justify-center pt-1.5">
+          <Eclipse size={24} style={{ color: "#0099ff" }} className={message.isStreaming ? "animate-spin" : ""} />
         </div>
         <div className="min-w-0 flex-1 pt-1.5">
-          <div className="text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </div>
+          {message.mode === "plan" ? (
+            <>
+              <AgentTimeline isStreaming={message.isStreaming} />
+              {message.content && (
+                <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
+                  {renderInlineMarkdown(message.content)}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-base leading-relaxed">
+              {message.isStreaming ? message.content : renderInlineMarkdown(message.content)}
+            </div>
+          )}
           {!message.isStreaming && message.content && (
             <div className="mt-2 flex items-center gap-0.5">
               <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">

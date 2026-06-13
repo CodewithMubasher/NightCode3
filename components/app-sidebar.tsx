@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +30,7 @@ import {
   Pencil,
   Trash2,
   ArrowRightFromLine,
+  Blocks,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -41,15 +42,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useChatStore } from "@/store/chat-store"
+import { useArtifactStore } from "@/store/artifact-store"
 
 const navItems = [
-  { icon: CirclePlus, label: "New Chat", href: "/" },
-  { icon: FolderPlus, label: "Projects", href: "/projects" },
-  { icon: Bolt, label: "Settings", href: "/settings" },
+  { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
+  { icon: FolderPlus, label: "Projects", href: "/projects", isNav: true },
+  { icon: Bolt, label: "Settings", href: "/settings", isNav: true },
+  { icon: Blocks, label: "Artifacts", isNav: false },
 ]
 
 export function AppSidebar() {
-  const pathname = usePathname()
   const router = useRouter()
   const chats = useChatStore((s) => s.chats)
 
@@ -72,14 +74,23 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
-                const active = pathname === item.href
+                if (item.isNav) {
+                  return (
+                    <SidebarMenuItem key={item.label}>
+                      <SidebarMenuButton asChild>
+                        <Link href={item.href}>
+                          <item.icon />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                }
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton asChild isActive={active}>
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
+                    <SidebarMenuButton onClick={() => useArtifactStore.getState().togglePanel()}>
+                      <item.icon />
+                      <span>{item.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )
@@ -107,11 +118,10 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {recentChats.map((chat) => {
-                const active = pathname === `/chat/${chat.id}`
                 return (
                   <SidebarMenuItem key={chat.id}>
                     <div className="group relative flex items-center">
-                      <SidebarMenuButton asChild isActive={active}>
+                      <SidebarMenuButton asChild>
                         <Link
                           href={`/chat/${chat.id}`}
                           onClick={() => useChatStore.getState().setActiveChat(chat.id)}
@@ -141,7 +151,7 @@ export function AppSidebar() {
                           <DropdownMenuItem
                             onClick={() => {
                               useChatStore.getState().deleteChat(chat.id)
-                              if (pathname === `/chat/${chat.id}`) router.push("/")
+                              if (window.location.pathname === `/chat/${chat.id}`) router.push("/")
                             }}
                             variant="destructive"
                           >

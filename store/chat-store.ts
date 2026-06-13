@@ -1,6 +1,8 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { Chat, Message, PromptMode, AttachmentData, AIProvider } from "@/types"
+import { useTimelineStore } from "./timeline-store"
+import { useArtifactStore } from "./artifact-store"
 
 interface ChatStore {
   chats: Record<string, Chat>
@@ -78,6 +80,10 @@ export const useChatStore = create<ChatStore>()(
         }
 
         const updatedTitle = chat.title === "New Chat" ? getChatTitle(content) : chat.title
+
+        if (chat.mode === "plan") {
+          useTimelineStore.getState().clearEvents()
+        }
 
         set((state) => ({
           chats: {
@@ -185,7 +191,50 @@ export const useChatStore = create<ChatStore>()(
                       },
                     }
                   })
+                } else if (event.type === "timeline_activity") {
+                  const ev = event.data as Record<string, unknown>
+                  if (ev?.title) {
+                    useTimelineStore.getState().addEvent({
+                      id: ev.id as string,
+                      type: (ev.type as "analysis" | "search" | "read" | "scan" | "generate" | "complete") || "analysis",
+                      title: ev.title as string,
+                      status: (ev.status as "pending" | "in_progress" | "completed") || "completed",
+                      fileReference: ev.fileReference as { name: string; type: string } | undefined,
+                      artifactId: ev.artifactId as string | undefined,
+                      timestamp: (ev.timestamp as number) || Date.now(),
+                    })
+                  }
+                } else if (event.type === "artifact_create") {
+                  const art = event.data as Record<string, unknown>
+                  if (art?.id && art?.title && art?.content) {
+                    useArtifactStore.getState().addArtifact({
+                      id: art.id as string,
+                      title: art.title as string,
+                      type: (art.type as "markdown" | "code" | "html" | "svg" | "mermaid") || "markdown",
+                      content: art.content as string,
+                    })
+                  }
                 } else if (event.type === "final") {
+                  const text = (event.data?.text as string) || ""
+                  if (text) {
+                    set((state) => {
+                      const c = state.chats[chatId]
+                      if (!c) return state
+                      return {
+                        chats: {
+                          ...state.chats,
+                          [chatId]: {
+                            ...c,
+                            messages: c.messages.map((m) =>
+                              m.id === assistantMessage.id
+                                ? { ...m, content: text }
+                                : m,
+                            ),
+                          },
+                        },
+                      }
+                    })
+                  }
                   isDone = true
                 } else if (event.type === "error") {
                   const errMsg = (event.data?.message as string) || "Unknown error"
