@@ -62,7 +62,7 @@ export function AppSidebar() {
     <Sidebar collapsible="offcanvas">
       <SidebarHeader className="p-0">
         <div className="mt-1.5 flex items-center gap-2 px-[18px] py-[12.4px]">
-          <Eclipse size={22} style={{ color: "#0099ff" }} />
+          <Eclipse size={22} style={{ color: "var(--primary-color)" }} />
           <span className="text-base font-semibold tracking-wider">NIGHTCODE</span>
         </div>
       </SidebarHeader>

@@ -21,8 +21,8 @@ export default function ChatPage() {
 
   if (!chat) return null
 
-  function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string) {
-    sendMessage(id, content, mode, attachments, model, provider)
+  function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) {
+    sendMessage(id, content, mode, skills)
   }
 
   return (

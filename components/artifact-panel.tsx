@@ -132,7 +132,7 @@ export function ArtifactPanel() {
         style={{ width: panelWidth }}
       >
         <div className="flex h-14 items-center gap-2 px-4 border-b border-border/50 shrink-0">
-          {showReader ? (
+          {showReader && activeArtifact ? (
             <>
               <Button variant="ghost" size="icon-sm" onClick={() => setActiveArtifactId(null)}>
                 <ChevronLeft className="size-4" />
@@ -146,16 +146,16 @@ export function ArtifactPanel() {
                     color: "#D1D1D1",
                   }}
                 >
-                  {activeArtifact!.title}
+                  {activeArtifact.title}
                   <span style={{ color: "#666" }}>·</span>
-                  <span style={{ color: "#0099ff" }}>{activeArtifact!.type.toUpperCase()}</span>
+                  <span style={{ color: "#0099ff" }}>{activeArtifact.type.toUpperCase()}</span>
                 </span>
               </div>
               <div className="ml-auto flex items-center gap-0.5">
-                <Button variant="ghost" size="icon-sm" onClick={() => handleCopy(activeArtifact!.content)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => handleCopy(activeArtifact.content)}>
                   <Copy className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => handleDownload(activeArtifact!)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => handleDownload(activeArtifact)}>
                   <Download className="size-4" />
                 </Button>
                 <Button variant="ghost" size="icon-sm" onClick={() => setIsOpen(false)}>

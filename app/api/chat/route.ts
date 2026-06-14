@@ -4,14 +4,18 @@ import type { AIProvider, Message } from "@/types"
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { messages, mode, messageId, model, provider: rawProvider } = body
+    const { messages, mode, messageId, model, provider: rawProvider, skillInjected } = body
+
+    console.log("API route received messages:", messages?.length ?? 0, "messages")
+    messages?.forEach((m: any, i: number) => console.log(`  msg[${i}] role=${m.role} (${m.content?.length ?? 0} chars)`))
+    console.log("API route skillInjected length:", skillInjected?.length ?? 0)
 
     if (!messages || !mode || !messageId) {
       return new Response("Missing required fields", { status: 400 })
     }
 
     const provider = (rawProvider || "opencode") as AIProvider
-    const effectiveModel = model || "deepseek-v4-flash-free"
+    const effectiveModel = model || "big-pickle"
 
     const encoder = new TextEncoder()
     const abortController = new AbortController()
@@ -23,8 +27,9 @@ export async function POST(req: Request) {
 
     const stream = new ReadableStream({
       async start(controller) {
-        const unsubscribe = engine.subscribe((_event, data) => {
+        const unsubscribe = engine.subscribe((_event, data: any) => {
           if (abortController.signal.aborted) return
+          console.log('SSE event:', data.type, data.payload ? JSON.stringify(data.payload).substring(0, 100) : '')
           try {
             const line = `data: ${JSON.stringify(data)}\n\n`
             controller.enqueue(encoder.encode(line))
@@ -40,7 +45,8 @@ export async function POST(req: Request) {
             messageId,
             provider,
             effectiveModel,
-            abortController.signal
+            abortController.signal,
+            body.skillInjected
           )
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Engine error"

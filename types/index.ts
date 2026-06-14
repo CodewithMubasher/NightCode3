@@ -57,6 +57,16 @@ export interface Chat {
   updatedAt: number
 }
 
-export type AIProvider = "opencode" | "groq" | "openai" | "openrouter" | "google"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode"
 
 export type View = "chat" | "settings" | "projects"
+
+export interface SkillInfo {
+  slug: string
+  title: string
+}
+
+export interface AppSettings {
+  theme: "dark" | "light"
+  primaryColor: string
+}

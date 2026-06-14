@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, PromptMode, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus } from "@/types"
+import type { Chat, Message, PromptMode, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings } from "@/types"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -19,6 +19,7 @@ interface NightCodeState {
   chats: Chat[]
   activeChatId: string | null
   isStreaming: boolean
+  settings: AppSettings
 
   createChat: (mode: PromptMode, model?: string, provider?: string) => string
   deleteChat: (id: string) => void
@@ -33,9 +34,10 @@ interface NightCodeState {
   deleteArtifact: (chatId: string, artifactId: string) => void
   renameChat: (id: string, title: string) => void
 
-  sendMessage: (chatId: string, content: string, mode: PromptMode, attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
+  sendMessage: (chatId: string, content: string, mode: PromptMode, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
   cancelStream: () => void
 
+  setSettings: (settings: Partial<AppSettings>) => void
   clearAll: () => void
 }
 
@@ -47,6 +49,10 @@ export const useNightCodeStore = create<NightCodeState>()(
       chats: [],
       activeChatId: null,
       isStreaming: false,
+      settings: {
+        theme: "dark",
+        primaryColor: "#FFFFFF",
+      },
 
       createChat: (mode, model, provider) => {
         const id = generateId()
@@ -56,7 +62,7 @@ export const useNightCodeStore = create<NightCodeState>()(
           title: "New Chat",
           messages: [],
           mode,
-          model: model ?? "deepseek-v4-flash-free",
+          model: model ?? "big-pickle",
           provider: provider ?? "opencode",
           createdAt: now,
           updatedAt: now,
@@ -189,7 +195,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         abortController = null
       },
 
-      sendMessage: async (chatId, content, mode, attachments, model, provider) => {
+      sendMessage: async (chatId, content, mode, skills, attachments, model, provider) => {
         const state = get()
         const chat = state.chats.find((c) => c.id === chatId)
         if (!chat) return
@@ -198,10 +204,39 @@ export const useNightCodeStore = create<NightCodeState>()(
         abortController = new AbortController()
         const signal = abortController.signal
 
+        console.log('User message:', content)
+        console.log('Skills detected:', skills)
+
+        const skillStates: ToolState[] = []
+        let skillInjected = ""
+        if (skills && skills.length > 0) {
+          for (const slug of skills) {
+            try {
+              const res = await fetch(`/api/skills/${slug}`)
+              if (res.ok) {
+                const data = await res.json() as { slug: string; title: string; content: string }
+                skillInjected += `\n\n## ACTIVE SKILL: ${data.title}\n\nYou MUST follow the rules below in your response:\n${data.content}\n\nEND OF SKILL: ${data.title}`
+                skillStates.push({
+                  id: `skill_${slug}`,
+                  tool: "skill",
+                  args: { slug, title: data.title },
+                  status: "verified" as ToolStatus,
+                  timestamp: Date.now(),
+                })
+              }
+            } catch {
+              // skip failed skill load
+            }
+          }
+        }
+
         const userMessage = emptyMessage(generateId(), "user", mode, "complete", attachments)
         userMessage.content = content
 
         const assistantMessage = emptyMessage(generateId(), "assistant", mode, "streaming")
+        for (const ss of skillStates) {
+          assistantMessage.toolStates[ss.id] = ss
+        }
 
         const updatedTitle = chat.title === "New Chat" ? getChatTitle(content) : chat.title
 
@@ -240,6 +275,7 @@ export const useNightCodeStore = create<NightCodeState>()(
               messageId: assistantMessage.id,
               model: effectiveModel,
               provider: effectiveProvider,
+              skillInjected: skillInjected || undefined,
             }),
             signal,
           })
@@ -332,6 +368,14 @@ export const useNightCodeStore = create<NightCodeState>()(
               }
             }
           }
+
+          const state = get()
+          const currentMsg = state.chats.find((c) => c.id === chatId)
+            ?.messages.find((m) => m.id === assistantMessage.id)
+          if (currentMsg && currentMsg.status === "streaming") {
+            console.log('Stream ended (HTTP 200). Final event received: message_complete? no. Setting status to complete.')
+            get().updateMessageStatus(chatId, assistantMessage.id, "complete")
+          }
         } catch (err) {
           if ((err as Error)?.name === "AbortError") {
             get().updateMessageStatus(chatId, assistantMessage.id, "interrupted")
@@ -345,6 +389,8 @@ export const useNightCodeStore = create<NightCodeState>()(
         }
       },
 
+      setSettings: (partial) =>
+        set((s) => ({ settings: { ...s.settings, ...partial } })),
       clearAll: () => set({ chats: [], activeChatId: null }),
     }),
     {
@@ -353,6 +399,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       partialize: (state) => ({
         chats: state.chats,
         activeChatId: state.activeChatId,
+        settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return

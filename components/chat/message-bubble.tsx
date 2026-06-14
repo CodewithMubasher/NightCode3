@@ -5,7 +5,7 @@ import type { Message, ToolState } from "@/types"
 import {
   Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
-  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck,
+  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen,
 } from "lucide-react"
 import {
   Attachments,
@@ -24,6 +24,7 @@ function toolIcon(toolName: string) {
     case "think": return Brain
     case "create_artifact": return FilePen
     case "create_folder": return FolderCheck
+    case "skill": return BookOpen
     default: return Circle
   }
 }
@@ -37,6 +38,8 @@ function toolArgs(toolState: ToolState): string | null {
   if (thought) return thought.length > 40 ? thought.slice(0, 40) + "..." : thought
   const title = toolState.args?.title as string | undefined
   if (title) return title
+  const slug = toolState.args?.slug as string | undefined
+  if (slug) return slug
   return null
 }
 
@@ -53,7 +56,21 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
   const iconColor = isFailed ? "#EF4444" : "#B3B3B3"
   const textColor = isFailed ? "#EF4444" : "#E0E0E0"
 
-  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact"].includes(toolState.tool)
+  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "skill"].includes(toolState.tool)
+
+  const toolLabels: Record<string, (a: string | null) => string> = {
+    write_file: () => "Created",
+    create_folder: () => "Created folder",
+    delete_file: () => "Deleted",
+    read_file: () => "Read",
+    create_artifact: (a) => a ?? "Created document",
+    list_directory: (a) => a ? `Listed ${a}` : "Listed directory",
+    search_files: () => "Searched files",
+    execute_command: (a) => a ? `Ran: ${a}` : "Ran command",
+    think: () => "Thinking",
+    skill: () => "Read skill",
+  }
+  const label = toolLabels[toolState.tool]?.(args) ?? toolState.tool
 
   return (
     <div className="relative flex items-center gap-1.5">
@@ -69,7 +86,7 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="text-[14px] font-sans" style={{ color: textColor }}>
-          {toolState.tool}
+          {label}
         </span>
         {args && isFilePath && (
           <span
@@ -101,7 +118,7 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
   )
 }
 
-function Timeline({ toolStates }: { toolStates: Record<string, ToolState> }) {
+function Timeline({ toolStates, message }: { toolStates: Record<string, ToolState>; message: Message }) {
   const entries = Object.values(toolStates)
   if (entries.length === 0) return null
 
@@ -114,14 +131,16 @@ function Timeline({ toolStates }: { toolStates: Record<string, ToolState> }) {
             <ToolTimelineItem toolState={ts} />
           </div>
         ))}
-        <div className="flex items-center gap-1.5">
-          <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
-            <CheckCircle2 className="size-3.5 text-emerald-500" />
+        {message.status !== "streaming" && (
+          <div className="flex items-center gap-1.5">
+            <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
+              <CheckCircle2 className="size-3.5 text-emerald-500" />
+            </div>
+            <div className="flex min-w-0 flex-1 items-center">
+              <span className="text-[14px] font-sans" style={{ color: "#B3B3B3" }}>Done</span>
+            </div>
           </div>
-          <div className="flex min-w-0 flex-1 items-center">
-            <span className="text-[14px] font-sans" style={{ color: "#B3B3B3" }}>Done</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )
@@ -163,7 +182,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     <div>
       <div className="flex items-start gap-3">
         <div className="flex shrink-0 items-center justify-center pt-1.5">
-          <Eclipse size={24} style={{ color: "#0099ff" }} className={message.status === "streaming" ? "animate-spin" : ""} />
+          <Eclipse size={24} style={{ color: "var(--primary-color)" }} className={message.status === "streaming" ? "animate-spin" : ""} />
         </div>
         <div className="min-w-0 flex-1 pt-1.5">
           {toolCount > 0 && (
@@ -176,7 +195,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </button>
           )}
 
-          {expanded && <Timeline toolStates={message.toolStates} />}
+          {expanded && <Timeline toolStates={message.toolStates} message={message} />}
           {message.content && (
             <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}
@@ -185,7 +204,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {message.status === "interrupted" && (
             <div className="mt-1 text-sm text-yellow-400 italic">This operation was interrupted</div>
           )}
-          {message.status === "error" && (
+          {message.hasError && (
             <div className="mt-1 text-sm text-red-400 italic">This response failed to generate</div>
           )}
           {message.status !== "streaming" && message.content && (

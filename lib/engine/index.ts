@@ -32,12 +32,21 @@ export class NightCodeEngine {
     messageId: string,
     provider: AIProvider,
     model: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    skillInjected?: string
   ): Promise<void> {
     const config: ModeConfig = MODE_CONFIGS[mode] ?? MODE_CONFIGS.chat
 
-    const systemPrompt = buildSystemPrompt(mode, config)
-    let context = buildContext(messages, systemPrompt)
+    const basePrompt = buildSystemPrompt(mode, config)
+    const fullSystemPrompt = skillInjected
+      ? basePrompt + '\n\n' + skillInjected
+      : basePrompt
+    if (skillInjected) {
+      console.log('Skill content injected, preview:', skillInjected.substring(0, 200))
+    } else {
+      console.log('No skills injected for this message')
+    }
+    let context = buildContext(messages, fullSystemPrompt)
 
     const availableTools: ToolImplementation[] = config.tools
       .map((t) => TOOL_REGISTRY[t.name])
@@ -47,14 +56,20 @@ export class NightCodeEngine {
     let consecutiveToolFailures = 0
     let forceRePlanCount = 0
     const toolsCalled = new Set<string>()
+    let filesCreated = 0
     const intent = config.intentDefault
+
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")?.content ?? ""
+    const isQuestion = /^(what|which|how|who|where|when|why|can you|could you|do you|is it|are there)/i.test(lastUserMsg.trim())
+    const filePattern = /[\w-]+\.[a-z]{1,6}/g
+    const requestedFiles = lastUserMsg.match(filePattern) || []
 
     for (let iteration = 0; iteration < config.maxIterations; iteration++) {
       if (signal.aborted) return
 
       console.log(`=== ITERATION ${iteration} ===`)
-      console.log("Messages being sent to LLM:")
-      context.forEach((m) => console.log(`  [${m.role}] ${m.content.substring(0, 200)}`))
+      console.log("Messages being sent to LLM (counts: sys=" + context.filter(m => m.role === "system").length + ", user=" + context.filter(m => m.role === "user").length + "):")
+      context.forEach((m) => console.log(`  [${m.role}] (${m.content.length} chars) ${m.content.substring(0, 300)}`))
 
       let output: PlannerOutput
 
@@ -65,6 +80,7 @@ export class NightCodeEngine {
           message: `LLM call failed: ${err instanceof Error ? err.message : "Unknown error"}`,
           iteration,
         })
+        console.log('Emitting message_complete event')
         this.emitEvent("message_complete", {})
         return
       }
@@ -72,7 +88,7 @@ export class NightCodeEngine {
       console.log(`LLM output: action=${output.action}`, output.action === "tool_call" ? `tool=${output.tool}` : "")
 
       if (output.action === "tool_call") {
-        const toolDef = availableTools.find((t) => t.name === output.tool)
+        const toolDef = availableTools.find((t) => t.name.replace(/_/g, "") === output.tool.replace(/_/g, ""))
         if (!toolDef) {
           this.emitEvent("error", {
             message: `Tool "${output.tool}" is not available in ${mode} mode`,
@@ -96,6 +112,7 @@ export class NightCodeEngine {
             consecutiveToolFailures = 0
             toolsExecuted++
             toolsCalled.add(output.tool)
+            if (output.tool === "write_file") filesCreated++
             this.emitEvent("tool_end", {
               tool: output.tool,
               args: output.args,
@@ -157,7 +174,8 @@ You must address this discrepancy. Try a different approach or fix the issue.`,
               message: `Tool "${output.tool}" failed 3 consecutive times. Terminating.`,
               lastError: execResult.error,
             })
-            this.emitEvent("message_complete", {})
+            console.log('Emitting message_complete event')
+        this.emitEvent("message_complete", {})
             return
           }
 
@@ -172,7 +190,7 @@ Try a different approach to accomplish the task.`,
           })
         }
       } else if (output.action === "respond") {
-        if (intent === "tool_required" && toolsExecuted === 0 && forceRePlanCount < 2) {
+        if (intent === "tool_required" && toolsExecuted === 0 && forceRePlanCount < 2 && !isQuestion) {
           forceRePlanCount++
           context.push({
             role: "user",
@@ -194,9 +212,19 @@ Try a different approach to accomplish the task.`,
           continue
         }
 
+        if (mode === "build" && !isQuestion && requestedFiles.length > 0 && filesCreated === 0 && forceRePlanCount < 2) {
+          forceRePlanCount++
+          context.push({
+            role: "user",
+            content: `You have NOT completed the task. The user asked for these files: ${requestedFiles.join(", ")}. You have created 0 files. Create ALL requested files before responding. Do not respond with text until every file exists.`,
+          })
+          continue
+        }
+
         this.emitEvent("thinking", { text: output.content, iteration })
 
-          this.emitEvent("message_complete", {})
+          console.log('Emitting message_complete event')
+        this.emitEvent("message_complete", {})
         return
       }
     }

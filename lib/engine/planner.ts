@@ -1,9 +1,7 @@
-import { generateText } from "ai"
+import { generateText, stepCountIs } from "ai"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createGroq } from "@ai-sdk/groq"
 import type { AIProvider } from "@/types"
-
-const OPENCODE_BASE = process.env.OPENCODE_BASE_URL || "https://api.opencode.ai/v1"
 
 const openrouter = createOpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -14,13 +12,13 @@ const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-const opencode = createOpenAI({
-  baseURL: OPENCODE_BASE,
-  apiKey: process.env.OPENCODE_API_KEY,
-})
-
 const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY,
+})
+
+const opencode = createOpenAI({
+  baseURL: "https://opencode.ai/zen/v1",
+  apiKey: process.env.OPENCODE_API_KEY || "",
 })
 
 function getLanguageModel(provider: AIProvider, modelId: string) {
@@ -28,9 +26,7 @@ function getLanguageModel(provider: AIProvider, modelId: string) {
     case "openai":
       return openai.languageModel(modelId)
     case "openrouter":
-      return openrouter.languageModel(modelId)
-    case "opencode":
-      return opencode.languageModel(modelId)
+      return openrouter.chat(modelId)
     case "groq":
       return groq.languageModel(modelId)
     case "google": {
@@ -38,6 +34,8 @@ function getLanguageModel(provider: AIProvider, modelId: string) {
       const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY })
       return google.languageModel(modelId)
     }
+    case "opencode":
+      return opencode.chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }
@@ -60,6 +58,7 @@ export async function plan(
     messages: messages as any,
     abortSignal: signal,
     temperature: 0.3,
+    stopWhen: stepCountIs(10),
   })
 
   const text = result.text.trim()
@@ -69,20 +68,70 @@ export async function plan(
 function parsePlannerOutput(text: string): PlannerOutput {
   const cleaned = text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "").trim()
 
-  const jsonStart = cleaned.indexOf("{")
-  const jsonEnd = cleaned.lastIndexOf("}")
-  if (jsonStart !== -1 && jsonEnd > jsonStart) {
+  const toolAliases: Record<string, string> = {
+    createartifact: "create_artifact",
+    create_artifact: "create_artifact",
+    writefile: "write_file",
+    write_file: "write_file",
+    readfile: "read_file",
+    read_file: "read_file",
+    createfolder: "create_folder",
+    create_folder: "create_folder",
+    deletefile: "delete_file",
+    delete_file: "delete_file",
+    listdirectory: "list_directory",
+    list_directory: "list_directory",
+    searchfiles: "search_files",
+    search_files: "search_files",
+    executecommand: "execute_command",
+    execute_command: "execute_command",
+    think: "think",
+  }
+
+  let idx = 0
+  while (idx < cleaned.length) {
+    const jsonStart = cleaned.indexOf("{", idx)
+    if (jsonStart === -1) break
+
+    let depth = 0
+    let jsonEnd = -1
+    for (let i = jsonStart; i < cleaned.length; i++) {
+      if (cleaned[i] === "{") depth++
+      else if (cleaned[i] === "}") {
+        depth--
+        if (depth === 0) { jsonEnd = i; break }
+      }
+    }
+    if (jsonEnd === -1) break
+
     const jsonStr = cleaned.slice(jsonStart, jsonEnd + 1)
+    idx = jsonEnd + 1
+
     try {
       const parsed = JSON.parse(jsonStr)
-      if (parsed.action === "tool_call" && parsed.tool) {
-        return { action: "tool_call", tool: parsed.tool, args: parsed.args ?? {} }
+
+      const action = (parsed.action || "").replace(/toolcall/i, "tool_call").replace(/_/g, "")
+
+      const rawTool = parsed.tool?.toLowerCase()
+      const tool = toolAliases[rawTool] || rawTool
+
+      let args: Record<string, unknown> = parsed.args ?? {}
+      if (tool === "create_artifact") {
+        args = {
+          title: (args.title as string) || (args.artifactname as string) || (args.artifact_name as string) || "Untitled",
+          type: (args.type as string) || (args.artifacttype as string) || (args.artifact_type as string) || "markdown",
+          content: (args.content as string) || (args.artifact_content as string) || "",
+        }
       }
-      if (parsed.action === "respond" && typeof parsed.content === "string") {
+
+      if ((action === "toolcall" || action === "tool_call") && tool) {
+        return { action: "tool_call", tool, args }
+      }
+      if (action === "respond" && typeof parsed.content === "string") {
         return { action: "respond", content: parsed.content }
       }
     } catch {
-      // fall through
+      // try next JSON object
     }
   }
 

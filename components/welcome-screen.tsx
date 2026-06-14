@@ -10,10 +10,10 @@ export function WelcomeScreen() {
   const createChat = useNightCodeStore((s) => s.createChat)
   const sendMessage = useNightCodeStore((s) => s.sendMessage)
 
-  function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string) {
+  function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) {
     const id = createChat(mode, model, provider)
     router.push(`/chat/${id}`)
-    sendMessage(id, content, mode, attachments, model, provider)
+    sendMessage(id, content, mode, skills, attachments, model, provider)
   }
 
   return (
