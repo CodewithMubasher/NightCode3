@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useCallback, useState } from "react"
 import { X, FileText, ChevronLeft, Download, Copy, Trash2 } from "lucide-react"
-import { useArtifactStore, type Artifact } from "@/store/artifact-store"
+import { useNightCodeStore } from "@/store/nightcode-store"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { renderInlineMarkdown } from "@/lib/render-markdown"
+import type { Artifact } from "@/types"
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
@@ -19,13 +20,20 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 export function ArtifactPanel() {
-  const { isOpen, artifacts, activeArtifactId, closePanel, setActiveArtifact, deleteArtifact } =
-    useArtifactStore()
+  const chats = useNightCodeStore((s) => s.chats)
+  const activeChatId = useNightCodeStore((s) => s.activeChatId)
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebar()
   const sidebarWasOpen = useRef(sidebarOpen)
   const wasOpened = useRef(false)
   const [panelWidth, setPanelWidth] = useState(420)
+  const [isOpen, setIsOpen] = useState(false)
+  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
   const isResizing = useRef(false)
+
+  const activeChat = chats.find((c) => c.id === activeChatId)
+  const artifacts: Artifact[] = activeChat
+    ? activeChat.messages.flatMap((m) => m.artifacts)
+    : []
 
   const activeArtifact = artifacts.find((a) => a.id === activeArtifactId)
   const showReader = isOpen && activeArtifactId !== null
@@ -74,10 +82,17 @@ export function ArtifactPanel() {
       if (e.key !== "a" || !(e.metaKey || e.ctrlKey)) return
       if (isTypingTarget(e.target)) return
       e.preventDefault()
-      useArtifactStore.getState().togglePanel()
+      setIsOpen((prev) => !prev)
+    }
+    function handleToggle() {
+      setIsOpen((prev) => !prev)
     }
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
+    window.addEventListener("toggle-artifact-panel", handleToggle)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("toggle-artifact-panel", handleToggle)
+    }
   }, [])
 
   const handleCopy = useCallback(async (content: string) => {
@@ -96,14 +111,6 @@ export function ArtifactPanel() {
     a.click()
     URL.revokeObjectURL(url)
   }, [])
-
-  const timeAgo = (() => {
-    const mins = Math.floor((Date.now() - 0) / 60000)
-    if (mins < 1) return "just now"
-    if (mins < 60) return `${mins} min ago`
-    const hours = Math.floor(mins / 60)
-    return `${hours}h ago`
-  })()
 
   return (
     <div
@@ -124,24 +131,34 @@ export function ArtifactPanel() {
         className="flex h-full flex-col bg-background text-foreground"
         style={{ width: panelWidth }}
       >
-        <div className="flex h-14 items-center justify-between px-4 border-b border-border/50 shrink-0">
+        <div className="flex h-14 items-center gap-2 px-4 border-b border-border/50 shrink-0">
           {showReader ? (
             <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setActiveArtifact(null)}
-              >
+              <Button variant="ghost" size="icon-sm" onClick={() => setActiveArtifactId(null)}>
                 <ChevronLeft className="size-4" />
               </Button>
-              <div className="flex items-center gap-0.5">
+              <div className="flex flex-1 items-center justify-center">
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-sans"
+                  style={{
+                    background: "#1A1A1A",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: "#D1D1D1",
+                  }}
+                >
+                  {activeArtifact!.title}
+                  <span style={{ color: "#666" }}>·</span>
+                  <span style={{ color: "#0099ff" }}>{activeArtifact!.type.toUpperCase()}</span>
+                </span>
+              </div>
+              <div className="ml-auto flex items-center gap-0.5">
                 <Button variant="ghost" size="icon-sm" onClick={() => handleCopy(activeArtifact!.content)}>
                   <Copy className="size-4" />
                 </Button>
                 <Button variant="ghost" size="icon-sm" onClick={() => handleDownload(activeArtifact!)}>
                   <Download className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={closePanel}>
+                <Button variant="ghost" size="icon-sm" onClick={() => setIsOpen(false)}>
                   <X className="size-4" />
                 </Button>
               </div>
@@ -149,7 +166,7 @@ export function ArtifactPanel() {
           ) : (
             <>
               <span className="text-sm font-semibold">Artifacts</span>
-              <Button variant="ghost" size="icon-sm" onClick={closePanel}>
+              <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => setIsOpen(false)}>
                 <X className="size-4" />
               </Button>
             </>
@@ -158,8 +175,8 @@ export function ArtifactPanel() {
 
         {showReader && activeArtifact ? (
           <div className="flex-1 overflow-auto hide-scrollbar">
-            <div className="mx-auto max-w-[900px] px-6 py-8">
-              <div className="[&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mb-4 [&_h1]:mt-6 [&_h1:first-child]:mt-0 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:pb-1 [&_h2]:border-b [&_h2]:border-border/20 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_p]:text-base [&_p]:leading-relaxed [&_p]:mb-3 [&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-xs [&_code]:font-mono [&_pre]:mb-4 [&_pre]:mt-2 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border/50 [&_pre]:bg-[#0a0a0a] [&_pre]:p-3.5 [&_pre]:text-xs [&_pre]:font-mono [&_pre]:leading-relaxed [&_pre]:overflow-x-auto [&_ul]:mb-3 [&_ul]:mt-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-0.5 [&_ol]:mb-3 [&_ol]:mt-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-0.5 [&_blockquote]:mb-3 [&_blockquote]:mt-1 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_table]:w-full [&_table]:mb-4 [&_table]:border-collapse [&_th]:border [&_th]:border-border/30 [&_th]:px-3 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-sm [&_th]:font-semibold [&_th]:bg-muted/30 [&_td]:border [&_td]:border-border/30 [&_td]:px-3 [&_td]:py-1.5 [&_td]:text-sm [&_hr]:my-6 [&_hr]:border-border/20 [&_a]:text-[#0099ff] [&_a]:hover:underline">
+            <div className="px-6 py-5">
+              <div className="[&_h1]:text-lg [&_h1]:font-bold [&_h1]:mb-3 [&_h1]:mt-5 [&_h1:first-child]:mt-0 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:pb-1 [&_h2]:border-b [&_h2]:border-border/20 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mb-1.5 [&_h3]:mt-3 [&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-2.5 [&_code]:rounded [&_code]:bg-muted/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_code]:font-mono [&_pre]:mb-3 [&_pre]:mt-1.5 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border/50 [&_pre]:bg-[#0a0a0a] [&_pre]:p-3 [&_pre]:text-[11px] [&_pre]:font-mono [&_pre]:leading-relaxed [&_pre]:overflow-x-auto [&_ul]:mb-2.5 [&_ul]:mt-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-0.5 [&_ol]:mb-2.5 [&_ol]:mt-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-0.5 [&_blockquote]:mb-2.5 [&_blockquote]:mt-1 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_blockquote]:text-sm [&_table]:w-full [&_table]:mb-3 [&_table]:border-collapse [&_th]:border [&_th]:border-border/30 [&_th]:px-2.5 [&_th]:py-1 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:bg-muted/30 [&_td]:border [&_td]:border-border/30 [&_td]:px-2.5 [&_td]:py-1 [&_td]:text-xs [&_hr]:my-5 [&_hr]:border-border/20 [&_a]:text-[#0099ff] [&_a]:hover:underline">
                 {renderInlineMarkdown(activeArtifact.content)}
               </div>
             </div>
@@ -176,13 +193,13 @@ export function ArtifactPanel() {
                   <div
                     key={artifact.id}
                     className={cn(
-                      "flex items-center gap-2 rounded-lg transition-colors duration-150 group",
-                      activeArtifactId === artifact.id && "bg-[rgba(59,130,246,0.08)]"
+                      "flex items-center gap-2 rounded-lg border border-white/10 transition-colors duration-150 group bg-muted/10 hover:bg-muted/30",
+                      activeArtifactId === artifact.id && "border-[rgba(59,130,246,0.3)] bg-[rgba(59,130,246,0.08)] hover:bg-[rgba(59,130,246,0.12)]"
                     )}
                   >
                     <button
-                      onClick={() => setActiveArtifact(artifact.id)}
-                      className="flex flex-1 items-center gap-3 p-3 text-left cursor-pointer"
+                      onClick={() => setActiveArtifactId(artifact.id)}
+                      className="flex flex-1 items-center gap-3 p-3 text-left cursor-pointer min-w-0"
                     >
                       <FileText className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
@@ -190,13 +207,17 @@ export function ArtifactPanel() {
                           {artifact.title}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {artifact.type} &bull; {timeAgo}
+                          {artifact.type}
                         </div>
                       </div>
                     </button>
                     <button
-                      onClick={() => deleteArtifact(artifact.id)}
-                      className="shrink-0 mr-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (activeChatId) useNightCodeStore.getState().deleteArtifact(activeChatId, artifact.id)
+                        if (activeArtifactId === artifact.id) setActiveArtifactId(null)
+                      }}
+                      className="mr-2 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-red-400 group-hover:opacity-100"
                     >
                       <Trash2 className="size-3.5" />
                     </button>

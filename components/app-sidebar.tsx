@@ -41,8 +41,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useChatStore } from "@/store/chat-store"
-import { useArtifactStore } from "@/store/artifact-store"
+import { useNightCodeStore } from "@/store/nightcode-store"
 
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
@@ -53,9 +52,9 @@ const navItems = [
 
 export function AppSidebar() {
   const router = useRouter()
-  const chats = useChatStore((s) => s.chats)
+  const chats = useNightCodeStore((s) => s.chats)
 
-  const recentChats = Object.values(chats)
+  const recentChats = [...chats]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 15)
 
@@ -88,7 +87,9 @@ export function AppSidebar() {
                 }
                 return (
                   <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton onClick={() => useArtifactStore.getState().togglePanel()}>
+                    <SidebarMenuButton onClick={() => {
+                      window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
+                    }}>
                       <item.icon />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
@@ -124,7 +125,7 @@ export function AppSidebar() {
                       <SidebarMenuButton asChild>
                         <Link
                           href={`/chat/${chat.id}`}
-                          onClick={() => useChatStore.getState().setActiveChat(chat.id)}
+                          onClick={() => useNightCodeStore.getState().setActiveChat(chat.id)}
                         >
                           <span className="truncate">{chat.title.length > 25 ? `${chat.title.slice(0, 25)}...` : chat.title}</span>
                         </Link>
@@ -142,7 +143,7 @@ export function AppSidebar() {
                           <DropdownMenuItem
                             onClick={() => {
                               const title = prompt("Rename chat:", chat.title)
-                              if (title?.trim()) useChatStore.getState().renameChat(chat.id, title.trim())
+                              if (title?.trim()) useNightCodeStore.getState().renameChat(chat.id, title.trim())
                             }}
                           >
                             <Pencil size={14} />
@@ -150,7 +151,7 @@ export function AppSidebar() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
-                              useChatStore.getState().deleteChat(chat.id)
+                              useNightCodeStore.getState().deleteChat(chat.id)
                               if (window.location.pathname === `/chat/${chat.id}`) router.push("/")
                             }}
                             variant="destructive"

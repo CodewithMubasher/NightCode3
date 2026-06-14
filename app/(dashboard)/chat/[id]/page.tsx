@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { useChatStore } from "@/store/chat-store"
+import { useNightCodeStore } from "@/store/nightcode-store"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import { PromptInput } from "@/components/prompt-input"
 import type { PromptMode, AttachmentData } from "@/types"
@@ -11,11 +11,9 @@ export default function ChatPage() {
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
-  const chat = useChatStore((s) => s.chats[id])
-  const sendMessage = useChatStore((s) => s.sendMessage)
-  const updateChatSettings = useChatStore((s) => s.updateChatSettings)
-  const streamingMessageId = useChatStore((s) => s.streamingMessageId)
-  const isThinking = useChatStore((s) => s.isThinking)
+  const chat = useNightCodeStore((s) => s.chats.find((c) => c.id === id))
+  const sendMessage = useNightCodeStore((s) => s.sendMessage)
+  const isStreaming = useNightCodeStore((s) => s.isStreaming)
 
   useEffect(() => {
     if (!chat) router.replace("/")
@@ -24,11 +22,7 @@ export default function ChatPage() {
   if (!chat) return null
 
   function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string) {
-    console.log("[PAGE SUBMIT]", JSON.stringify({ provider, model, mode }))
-    if (model && model !== chat.model) {
-      updateChatSettings(id, { model })
-    }
-    sendMessage(id, content, attachments, model, provider)
+    sendMessage(id, content, mode, attachments, model, provider)
   }
 
   return (
@@ -40,7 +34,7 @@ export default function ChatPage() {
               key={message.id}
               className="animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
             >
-              <MessageBubble message={message} chatId={id} />
+              <MessageBubble message={message} />
             </div>
           ))}
         </div>
@@ -49,7 +43,7 @@ export default function ChatPage() {
         <div className="mx-auto max-w-3xl">
           <PromptInput
             onSubmit={handleSubmit}
-            disabled={streamingMessageId !== null || isThinking}
+            disabled={isStreaming}
             defaultMode={chat.mode}
             defaultModel={chat.model}
             defaultProvider={chat.provider}

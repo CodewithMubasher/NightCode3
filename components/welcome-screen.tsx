@@ -2,18 +2,18 @@
 
 import { useRouter } from "next/navigation"
 import { PromptInput } from "@/components/prompt-input"
-import { useChatStore } from "@/store/chat-store"
+import { useNightCodeStore } from "@/store/nightcode-store"
 import type { PromptMode, AttachmentData } from "@/types"
 
 export function WelcomeScreen() {
   const router = useRouter()
-  const createChat = useChatStore((s) => s.createChat)
-  const sendMessage = useChatStore((s) => s.sendMessage)
+  const createChat = useNightCodeStore((s) => s.createChat)
+  const sendMessage = useNightCodeStore((s) => s.sendMessage)
 
   function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string) {
     const id = createChat(mode, model, provider)
     router.push(`/chat/${id}`)
-    sendMessage(id, content, attachments, model, provider)
+    sendMessage(id, content, mode, attachments, model, provider)
   }
 
   return (

@@ -7,7 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Check, ChevronDown, ArrowUp, Square, Paperclip, Search } from "lucide-react"
+import { Check, ChevronDown, ArrowUp, Square, Paperclip, Search, StopCircle } from "lucide-react"
 import {
   Attachments,
   Attachment,
@@ -16,13 +16,14 @@ import {
   AttachmentRemove,
   type AttachmentData,
 } from "@/components/ai-elements/attachments"
+import { useNightCodeStore } from "@/store/nightcode-store"
 
 const MAX_INPUT = 1000
 
 const modes: { value: PromptMode; label: string; color: string }[] = [
+  { value: "chat", label: "Chat", color: "#FFFFFF" },
   { value: "plan", label: "Plan", color: "#FF8C00" },
-  { value: "build", label: "Build", color: "#22C55E" },
-  { value: "chat", label: "Chat", color: "#888" },
+  { value: "build", label: "Build", color: "#14B8A6" },
 ]
 
 interface ModelEntry {
@@ -265,11 +266,10 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
 
             {value.trim() && (
               <button
-                onClick={disabled ? undefined : handleSubmit}
-                disabled={disabled}
+                onClick={disabled ? () => useNightCodeStore.getState().cancelStream() : handleSubmit}
                 className="flex size-7 items-center justify-center rounded-full bg-[#0099ff] text-white transition-all hover:bg-[#0099ff]/90 disabled:opacity-50"
               >
-                {disabled ? <Square size={12} /> : <ArrowUp size={14} />}
+                {disabled ? <StopCircle size={14} /> : <ArrowUp size={14} />}
               </button>
             )}
           </div>

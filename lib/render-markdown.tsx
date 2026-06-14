@@ -1,12 +1,4 @@
 import type { ReactNode } from "react"
-import { FileText, FileCode, FileJson } from "lucide-react"
-
-const fileIconMap: Record<string, typeof FileText> = {
-  ts: FileCode, tsx: FileCode, js: FileCode, jsx: FileCode,
-  css: FileCode, html: FileCode, py: FileCode, sql: FileCode,
-  json: FileJson, yaml: FileCode, yml: FileCode,
-  md: FileText, svg: FileCode, mjs: FileCode, cjs: FileCode,
-}
 
 export function renderInlineMarkdown(content: string): ReactNode {
   const lines = content.split("\n")
@@ -171,29 +163,6 @@ function renderInline(fullContent: string, line: string): ReactNode {
         </code>
       )
       remaining = remaining.slice(codeMatch[0].length)
-      continue
-    }
-
-    const fileMatch = remaining.match(/^[\w.-]+\.(tsx|ts|js|jsx|css|py|json|md|html|sql|yaml|yml|svg|mjs|cjs)\b/i)
-    if (fileMatch) {
-      const fileName = fileMatch[0]
-      const ext = fileName.split(".").pop()?.toLowerCase() || ""
-      const Icon = fileIconMap[ext] || FileText
-      parts.push(
-        <span
-          key={key++}
-          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-sans align-middle mx-0.5"
-          style={{
-            background: "#1A1A1A",
-            border: "1px solid rgba(255,255,255,0.08)",
-            color: "#D1D1D1",
-          }}
-        >
-          <Icon className="size-3" style={{ color: "#0099ff" }} />
-          {fileName}
-        </span>
-      )
-      remaining = remaining.slice(fileName.length)
       continue
     }
 

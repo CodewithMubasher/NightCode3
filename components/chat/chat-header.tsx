@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useChatStore } from "@/store/chat-store"
+import { useNightCodeStore } from "@/store/nightcode-store"
 
 interface ChatHeaderProps {
   chatId: string
@@ -17,9 +17,9 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ chatId }: ChatHeaderProps) {
   const router = useRouter()
-  const chat = useChatStore((s) => s.chats[chatId])
-  const deleteChat = useChatStore((s) => s.deleteChat)
-  const renameChat = useChatStore((s) => s.renameChat)
+  const chat = useNightCodeStore((s) => s.chats.find((c) => c.id === chatId))
+  const deleteChat = useNightCodeStore((s) => s.deleteChat)
+  const renameChat = useNightCodeStore((s) => s.renameChat)
   const [renaming, setRenaming] = useState(false)
   const [newTitle, setNewTitle] = useState(chat?.title ?? "")
 
