@@ -46,37 +46,6 @@ export async function POST(req: Request) {
         } catch {}
         console.log(`Loaded ${mcpTools.length} MCP tools`)
 
-        const lastUserMsg = (messages as Message[]).filter(m => m.role === "user").pop()
-        const imageMatch = lastUserMsg?.content?.match(/^\s*@image\s+(.+)/)
-        if (imageMatch) {
-          try {
-            const prompt = imageMatch[1]
-            const { default: puter } = await import("@heyputer/puter.js")
-            const result = await puter.ai.txt2img(prompt, {
-              test_mode: true,
-              model: "gemini-2.5-flash",
-              response_format: "b64_json",
-            })
-            const dataUrl = (result as any)?.data?.[0]?.b64_json
-              ? `data:image/png;base64,${(result as any).data[0].b64_json}`
-              : (result as any)?.image_url
-              ? (result as any).image_url
-              : null
-            if (dataUrl) {
-              const line = `data: ${JSON.stringify({ type: "image_generated", payload: { imageUrl: dataUrl, prompt }, timestamp: Date.now() })}\n\n`
-              controller.enqueue(encoder.encode(line))
-            } else {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", payload: { message: "No image from txt2img" }, timestamp: Date.now() })}\n\n`))
-            }
-          } catch (err) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", payload: { message: err instanceof Error ? err.message : "Image gen failed" }, timestamp: Date.now() })}\n\n`))
-          }
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "message_complete", payload: {}, timestamp: Date.now() })}\n\n`))
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"))
-          controller.close()
-          return
-        }
-
         try {
           await engine.run(
             messages as Message[],

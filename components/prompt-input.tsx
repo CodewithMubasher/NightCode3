@@ -13,7 +13,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
-import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Image as ImageIcon, Brain } from "lucide-react"
+import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Brain } from "lucide-react"
 import {
   Attachments,
   Attachment,
@@ -250,25 +250,6 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                 >
                   <Paperclip size={14} className="mr-2" />
                   <span>Upload files</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    const ta = textareaRef.current
-                    if (ta) {
-                      const before = value.slice(0, ta.selectionStart)
-                      const after = value.slice(ta.selectionStart)
-                      const newVal = before + "@image " + after
-                      setValue(newVal)
-                      React.startTransition(() => {
-                        const pos = before.length + 7
-                        ta.setSelectionRange(pos, pos)
-                        ta.focus()
-                      })
-                    }
-                  }}
-                >
-                  <ImageIcon size={14} className="mr-2" />
-                  <span>Create image</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => {

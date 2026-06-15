@@ -1,13 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import type { Message, ToolState } from "@/types"
 import {
   Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
-  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable, Image as ImageIcon,
+  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable,
 } from "lucide-react"
-import { AspectRatio } from "@/components/ui/aspect-ratio"
 import {
   Attachments,
   Attachment,
@@ -16,11 +15,9 @@ import {
 import { renderInlineMarkdown } from "@/lib/render-markdown"
 
 function toolIcon(toolName: string) {
-  if (!toolName.startsWith("generate_image")) {
-    const mcpMatch = toolName.match(/^(.+?)_(.+)/)
-    if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","generate_image"].includes(toolName)) {
-      return Cable
-    }
+  const mcpMatch = toolName.match(/^(.+?)_(.+)/)
+  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill"].includes(toolName)) {
+    return Cable
   }
   switch (toolName) {
     case "read_file": return FileText
@@ -32,7 +29,6 @@ function toolIcon(toolName: string) {
     case "create_artifact": return FilePen
     case "create_folder": return FolderCheck
     case "skill": return BookOpen
-    case "generate_image": return ImageIcon
     default: return Circle
   }
 }
@@ -79,7 +75,6 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
     execute_command: (a) => a ? `Ran: ${a}` : "Ran command",
     think: () => "Thinking",
     skill: () => "Read skill",
-    generate_image: (a) => a ? `Generate: ${a}` : "Generating image",
   }
   const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
 
@@ -166,6 +161,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const [expanded, setExpanded] = useState(isStreamingTool)
 
+  useEffect(() => { if (isStreamingTool) setExpanded(true) }, [isStreamingTool])
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -196,7 +193,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <Eclipse size={24} style={{ color: "var(--primary-color)" }} className={message.status === "streaming" ? "animate-spin" : ""} />
         </div>
         <div className="min-w-0 flex-1 pt-1.5">
-          {toolCount > 0 && !message.imageUrl && (
+          {toolCount > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-1.5 py-1 text-sm font-sans text-[#B3B3B3] hover:text-white transition-colors"
@@ -206,18 +203,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </button>
           )}
 
-          {expanded && !message.imageUrl && <Timeline toolStates={message.toolStates} message={message} />}
-          {message.imageUrl && (
-            <div className="mt-1 mb-3 w-full max-w-sm rounded-xl bg-card ring-1 ring-foreground/10 overflow-hidden">
-              <AspectRatio ratio={1}>
-                <img
-                  src={message.imageUrl}
-                  alt={message.content || "Generated image"}
-                  className="h-full w-full object-cover"
-                />
-              </AspectRatio>
-            </div>
-          )}
+          {expanded && <Timeline toolStates={message.toolStates} message={message} />}
           {message.content && (
             <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}

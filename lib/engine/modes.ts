@@ -21,7 +21,6 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "execute_command" },
     { name: "think" },
     { name: "create_artifact" },
-    { name: "generate_image" },
   ],
   maxIterations: 20,
   allowAutoFix: true,

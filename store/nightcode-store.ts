@@ -27,7 +27,6 @@ interface NightCodeState {
 
   addMessage: (chatId: string, message: Message) => void
   updateMessageContent: (chatId: string, messageId: string, content: string) => void
-  updateMessageImage: (chatId: string, messageId: string, imageUrl: string) => void
   updateToolState: (chatId: string, messageId: string, toolState: ToolState) => void
   updateMessageStatus: (chatId: string, messageId: string, status: MessageStatus) => void
   setMessageError: (chatId: string, messageId: string, error: boolean) => void
@@ -104,22 +103,6 @@ export const useNightCodeStore = create<NightCodeState>()(
                   ...c,
                   messages: c.messages.map((m) =>
                     m.id === messageId ? { ...m, content: m.content + content } : m
-                  ),
-                  updatedAt: Date.now(),
-                }
-              : c
-          ),
-        }))
-      },
-
-      updateMessageImage: (chatId, messageId, imageUrl) => {
-        set((s) => ({
-          chats: s.chats.map((c) =>
-            c.id === chatId
-              ? {
-                  ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === messageId ? { ...m, imageUrl } : m
                   ),
                   updatedAt: Date.now(),
                 }
@@ -373,11 +356,6 @@ export const useNightCodeStore = create<NightCodeState>()(
                         window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
                       }
                     }
-                    break
-                  }
-                  case "image_generated": {
-                    const imageUrl = (parsed.payload?.imageUrl as string) ?? ""
-                    if (imageUrl) get().updateMessageImage(chatId, assistantMessage.id, imageUrl)
                     break
                   }
                   case "error": {

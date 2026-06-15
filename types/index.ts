@@ -41,7 +41,6 @@ export interface Message {
   status: MessageStatus
   hasError: boolean
   attachments?: AttachmentData[]
-  imageUrl?: string
 }
 
 export interface Chat {

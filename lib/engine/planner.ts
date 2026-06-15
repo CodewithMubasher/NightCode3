@@ -52,13 +52,17 @@ export async function plan(
   signal?: AbortSignal
 ): Promise<PlannerOutput> {
   if (provider === "puter") {
-    const { default: puter } = await import("@heyputer/puter.js")
-    const response = await puter.ai.chat(
-      messages.map((m) => ({ role: m.role, content: m.content })),
-      { model: modelId, temperature: 0.3 }
-    )
-    const text = (typeof response.message?.content === "string" ? response.message.content : "") || ""
-    return parsePlannerOutput(text)
+    try {
+      const { default: puter } = await import("@heyputer/puter.js")
+      const response = await puter.ai.chat(
+        messages.map((m) => ({ role: m.role, content: m.content })),
+        { model: modelId, temperature: 0.3 }
+      )
+      const text = (typeof response.message?.content === "string" ? response.message.content : "") || ""
+      return parsePlannerOutput(text)
+    } catch {
+      return { action: "respond", content: "Puter provider requires authentication and is currently unavailable. Please switch to another provider (OpenCode, Google, etc.) in your settings." }
+    }
   }
 
   const model = getLanguageModel(provider, modelId)
@@ -108,8 +112,6 @@ function parsePlannerOutput(text: string): PlannerOutput {
     executecommand: "execute_command",
     execute_command: "execute_command",
     think: "think",
-    generateimage: "generate_image",
-    generate_image: "generate_image",
   }
 
   let idx = 0
@@ -142,9 +144,9 @@ function parsePlannerOutput(text: string): PlannerOutput {
       let args: Record<string, unknown> = parsed.args ?? {}
       if (tool === "create_artifact") {
         args = {
-          title: (args.title as string) || (args.artifactname as string) || (args.artifact_name as string) || "Untitled",
+          title: (args.title as string) || (args.name as string) || (args.subject as string) || (args.heading as string) || (args.artifactname as string) || (args.artifact_name as string) || "Untitled",
           type: (args.type as string) || (args.artifacttype as string) || (args.artifact_type as string) || "markdown",
-          content: (args.content as string) || (args.artifact_content as string) || "",
+          content: (args.content as string) || (args.body as string) || (args.text as string) || (args.document as string) || (args.plan as string) || (args.data as string) || (args.description as string) || (args.value as string) || (args.artifact_content as string) || (args.markdown as string) || "",
         }
       }
 

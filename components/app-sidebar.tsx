@@ -22,6 +22,7 @@ import {
   Bolt,
   Wrench,
   Plus,
+  Box,
   EllipsisVertical,
   LogOut,
   User,
@@ -46,6 +47,7 @@ import { useNightCodeStore } from "@/store/nightcode-store"
 
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
+  { icon: Box, label: "Agent Studio", href: "/studio", isNav: true },
   { icon: FolderPlus, label: "Projects", href: "/projects", isNav: true },
   { icon: Wrench, label: "Customize", href: "/customize", isNav: true },
   { icon: Bolt, label: "Settings", href: "/settings", isNav: true },

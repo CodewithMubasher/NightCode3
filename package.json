@@ -22,6 +22,7 @@
     "@langchain/langgraph": "^1.4.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
+    "@xyflow/react": "^12.11.0",
     "ai": "^6.0.202",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
