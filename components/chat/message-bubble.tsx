@@ -5,8 +5,9 @@ import type { Message, ToolState } from "@/types"
 import {
   Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
-  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen,
+  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable, Image as ImageIcon,
 } from "lucide-react"
+import { AspectRatio } from "@/components/ui/aspect-ratio"
 import {
   Attachments,
   Attachment,
@@ -15,6 +16,12 @@ import {
 import { renderInlineMarkdown } from "@/lib/render-markdown"
 
 function toolIcon(toolName: string) {
+  if (!toolName.startsWith("generate_image")) {
+    const mcpMatch = toolName.match(/^(.+?)_(.+)/)
+    if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","generate_image"].includes(toolName)) {
+      return Cable
+    }
+  }
   switch (toolName) {
     case "read_file": return FileText
     case "write_file": return FilePen
@@ -25,6 +32,7 @@ function toolIcon(toolName: string) {
     case "create_artifact": return FilePen
     case "create_folder": return FolderCheck
     case "skill": return BookOpen
+    case "generate_image": return ImageIcon
     default: return Circle
   }
 }
@@ -40,6 +48,8 @@ function toolArgs(toolState: ToolState): string | null {
   if (title) return title
   const slug = toolState.args?.slug as string | undefined
   if (slug) return slug
+  const prompt = toolState.args?.prompt as string | undefined
+  if (prompt) return prompt.length > 40 ? prompt.slice(0, 40) + "..." : prompt
   return null
 }
 
@@ -69,8 +79,9 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
     execute_command: (a) => a ? `Ran: ${a}` : "Ran command",
     think: () => "Thinking",
     skill: () => "Read skill",
+    generate_image: (a) => a ? `Generate: ${a}` : "Generating image",
   }
-  const label = toolLabels[toolState.tool]?.(args) ?? toolState.tool
+  const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
 
   return (
     <div className="relative flex items-center gap-1.5">
@@ -185,7 +196,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <Eclipse size={24} style={{ color: "var(--primary-color)" }} className={message.status === "streaming" ? "animate-spin" : ""} />
         </div>
         <div className="min-w-0 flex-1 pt-1.5">
-          {toolCount > 0 && (
+          {toolCount > 0 && !message.imageUrl && (
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-1.5 py-1 text-sm font-sans text-[#B3B3B3] hover:text-white transition-colors"
@@ -195,7 +206,18 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </button>
           )}
 
-          {expanded && <Timeline toolStates={message.toolStates} message={message} />}
+          {expanded && !message.imageUrl && <Timeline toolStates={message.toolStates} message={message} />}
+          {message.imageUrl && (
+            <div className="mt-1 mb-3 w-full max-w-sm rounded-xl bg-card ring-1 ring-foreground/10 overflow-hidden">
+              <AspectRatio ratio={1}>
+                <img
+                  src={message.imageUrl}
+                  alt={message.content || "Generated image"}
+                  className="h-full w-full object-cover"
+                />
+              </AspectRatio>
+            </div>
+          )}
           {message.content && (
             <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}

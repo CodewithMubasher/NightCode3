@@ -1,6 +1,6 @@
 import type { Message, AIProvider } from "@/types"
 import { EventEmitter } from "./event-emitter"
-import { MODE_CONFIGS, type ModeConfig } from "./modes"
+import { AGENT_CONFIG, type ModeConfig } from "./modes"
 import { buildSystemPrompt, buildContext } from "./context-builder"
 import { plan, type PlannerOutput } from "./planner"
 import { executeTool } from "./executor"
@@ -28,16 +28,16 @@ export class NightCodeEngine {
 
   async run(
     messages: Message[],
-    mode: string,
     messageId: string,
     provider: AIProvider,
     model: string,
     signal: AbortSignal,
-    skillInjected?: string
+    skillInjected?: string,
+    mcpTools?: ToolImplementation[]
   ): Promise<void> {
-    const config: ModeConfig = MODE_CONFIGS[mode] ?? MODE_CONFIGS.chat
+    const config: ModeConfig = AGENT_CONFIG
 
-    const basePrompt = buildSystemPrompt(mode, config)
+    const basePrompt = buildSystemPrompt(mcpTools)
     const fullSystemPrompt = skillInjected
       ? basePrompt + '\n\n' + skillInjected
       : basePrompt
@@ -48,21 +48,15 @@ export class NightCodeEngine {
     }
     let context = buildContext(messages, fullSystemPrompt)
 
-    const availableTools: ToolImplementation[] = config.tools
+    let availableTools: ToolImplementation[] = config.tools
       .map((t) => TOOL_REGISTRY[t.name])
       .filter(Boolean)
 
-    let toolsExecuted = 0
-    let consecutiveToolFailures = 0
-    let forceRePlanCount = 0
-    const toolsCalled = new Set<string>()
-    let filesCreated = 0
-    const intent = config.intentDefault
+    if (mcpTools) {
+      availableTools = [...availableTools, ...mcpTools]
+    }
 
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")?.content ?? ""
-    const isQuestion = /^(what|which|how|who|where|when|why|can you|could you|do you|is it|are there)/i.test(lastUserMsg.trim())
-    const filePattern = /[\w-]+\.[a-z]{1,6}/g
-    const requestedFiles = lastUserMsg.match(filePattern) || []
+    let consecutiveToolFailures = 0
 
     for (let iteration = 0; iteration < config.maxIterations; iteration++) {
       if (signal.aborted) return
@@ -88,11 +82,17 @@ export class NightCodeEngine {
       console.log(`LLM output: action=${output.action}`, output.action === "tool_call" ? `tool=${output.tool}` : "")
 
       if (output.action === "tool_call") {
-        const toolDef = availableTools.find((t) => t.name.replace(/_/g, "") === output.tool.replace(/_/g, ""))
+        const normalize = (name: string) => name.replace(/-/g, "_").toLowerCase()
+        const toolDef = availableTools.find((t) => normalize(t.name) === normalize(output.tool))
         if (!toolDef) {
+          const allToolNames = availableTools.map((t) => t.name)
           this.emitEvent("error", {
-            message: `Tool "${output.tool}" is not available in ${mode} mode`,
+            message: `Tool "${output.tool}" is not available`,
             iteration,
+          })
+          context.push({
+            role: "user",
+            content: `Tool "${output.tool}" not found. Available tools: ${allToolNames.join(", ")}. Try a different tool or respond with text.`,
           })
           continue
         }
@@ -110,9 +110,6 @@ export class NightCodeEngine {
 
           if (verification.verified) {
             consecutiveToolFailures = 0
-            toolsExecuted++
-            toolsCalled.add(output.tool)
-            if (output.tool === "write_file") filesCreated++
             this.emitEvent("tool_end", {
               tool: output.tool,
               args: output.args,
@@ -138,9 +135,9 @@ ARGS: ${JSON.stringify(output.args)}
 RESULT: SUCCESS (verified by runtime)
 ${JSON.stringify(execResult.data)}
 
-The tool has completed. The file now exists on disk. You MUST now respond to the user with a final message. Do NOT call any more tools. Output {"action":"respond","content":"..."} IMMEDIATELY.`
+The tool has completed. Continue reasoning and call more tools if needed, or respond to the user when done.`
             context.push({ role: "user", content: toolResultMsg })
-            console.log(`[VERIFIED] Pushed tool result to context. toolsExecuted=${toolsExecuted + 1}`)
+            console.log(`[VERIFIED] Pushed tool result to context`)
           } else {
             this.emitEvent("tool_end", {
               tool: output.tool,
@@ -190,37 +187,6 @@ Try a different approach to accomplish the task.`,
           })
         }
       } else if (output.action === "respond") {
-        if (intent === "tool_required" && toolsExecuted === 0 && forceRePlanCount < 2 && !isQuestion) {
-          forceRePlanCount++
-          context.push({
-            role: "user",
-            content: `You responded without using any tools, but this mode requires tool usage. You MUST call one of these tools: ${availableTools.map(t => t.name).join(", ")}. Do not pretend to have done work. Actually call the necessary tool.`,
-          })
-          continue
-        }
-
-        const responseText = (output.content ?? "").toLowerCase()
-        const claimedArtifactCreation =
-          responseText.includes("artifact") &&
-          (responseText.includes("created") || responseText.includes("in the"))
-        if (mode === "plan" && claimedArtifactCreation && !toolsCalled.has("create_artifact") && forceRePlanCount < 1) {
-          forceRePlanCount++
-          context.push({
-            role: "user",
-            content: `You claimed to create an artifact but did not call create_artifact. You MUST call the create_artifact tool with the full content. Do not just say you created it — actually call the tool.`,
-          })
-          continue
-        }
-
-        if (mode === "build" && !isQuestion && requestedFiles.length > 0 && filesCreated === 0 && forceRePlanCount < 2) {
-          forceRePlanCount++
-          context.push({
-            role: "user",
-            content: `You have NOT completed the task. The user asked for these files: ${requestedFiles.join(", ")}. You have created 0 files. Create ALL requested files before responding. Do not respond with text until every file exists.`,
-          })
-          continue
-        }
-
         this.emitEvent("thinking", { text: output.content, iteration })
 
           console.log('Emitting message_complete event')

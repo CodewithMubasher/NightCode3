@@ -4,6 +4,7 @@ const GROQ_KEY = process.env.GROQ_API_KEY
 const GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY
+const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
   { id: "llama-3.3-70b-versatile", display_name: "Llama 3.3 70B Versatile", provider: "groq", provider_display_name: "Groq" },
@@ -60,6 +61,24 @@ async function fetchOpenCodeModels() {
   }
 }
 
+async function fetchPuterModels() {
+  try {
+    const { default: puter } = await import("@heyputer/puter.js")
+    const raw = await puter.ai.listModels()
+    const models = (raw as any[])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.name || m.id,
+        provider: "puter" as const,
+        provider_display_name: "Puter",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
 export async function GET() {
   const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
@@ -93,6 +112,16 @@ export async function GET() {
       groups.push({
         label: "OpenCode",
         models: ocModels,
+      })
+    }
+  }
+
+  if (PUTER_ENABLED) {
+    const puterModels = await fetchPuterModels()
+    if (puterModels) {
+      groups.push({
+        label: "Puter",
+        models: puterModels,
       })
     }
   }

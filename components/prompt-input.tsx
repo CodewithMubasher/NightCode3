@@ -1,13 +1,19 @@
 "use client"
 
 import * as React from "react"
-import { type PromptMode, type SkillInfo } from "@/types"
+import { type SkillInfo } from "@/types"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Check, ChevronDown, ArrowUp, Square, Paperclip, Search, StopCircle, Scroll } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
+import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Image as ImageIcon, Brain } from "lucide-react"
 import {
   Attachments,
   Attachment,
@@ -20,11 +26,8 @@ import { useNightCodeStore } from "@/store/nightcode-store"
 
 const MAX_INPUT = 1000
 
-const modes: { value: PromptMode; label: string; color: string }[] = [
-  { value: "chat", label: "Chat", color: "#FFFFFF" },
-  { value: "plan", label: "Plan", color: "#FF8C00" },
-  { value: "build", label: "Build", color: "#14B8A6" },
-]
+let cachedModelGroups: ModelGroupData[] | null = null
+let cachedSkills: SkillInfo[] | null = null
 
 interface ModelEntry {
   id: string
@@ -33,15 +36,9 @@ interface ModelEntry {
   provider_display_name: string
 }
 
-interface ModelGroup {
-  label: string
-  models: ModelEntry[]
-}
-
 interface PromptInputProps {
-  onSubmit?: (content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) => void
+  onSubmit?: (content: string, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) => void
   disabled?: boolean
-  defaultMode?: PromptMode
   defaultModel?: string
   defaultProvider?: string
 }
@@ -61,15 +58,15 @@ function findModelEntry(modelGroups: ModelGroupData[], modelId: string, provider
   return modelGroups[0]?.models[0] ?? null
 }
 
-export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, defaultProvider }: PromptInputProps) {
-  const [mode, setMode] = React.useState<PromptMode>(defaultMode ?? "chat")
-  const [modelGroups, setModelGroups] = React.useState<ModelGroupData[]>([])
-  const [selectedEntry, setSelectedEntry] = React.useState<ModelEntry | null>(null)
+export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider }: PromptInputProps) {
+  const settings = useNightCodeStore((s) => s.settings)
+  const [modelGroups, setModelGroups] = React.useState<ModelGroupData[]>(cachedModelGroups ?? [])
+  const [selectedEntry, setSelectedEntry] = React.useState<ModelEntry>({ id: defaultModel ?? settings.defaultModel, display_name: defaultModel ?? settings.defaultModel, provider: defaultProvider ?? settings.defaultProvider, provider_display_name: defaultProvider ?? settings.defaultProvider })
   const [value, setValue] = React.useState("")
   const [attachments, setAttachments] = React.useState<AttachmentData[]>([])
   const [modelSearch, setModelSearch] = React.useState("")
   const [popoverOpen, setPopoverOpen] = React.useState(false)
-  const [skills, setSkills] = React.useState<SkillInfo[]>([])
+  const [skills, setSkills] = React.useState<SkillInfo[]>(cachedSkills ?? [])
   const [skillSearch, setSkillSearch] = React.useState<string | null>(null)
   const [skillCursor, setSkillCursor] = React.useState(0)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -77,14 +74,19 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
   const searchRef = React.useRef<HTMLInputElement>(null)
 
   React.useEffect(() => {
-    fetch("/api/skills").then((r) => r.json()).then(setSkills).catch(() => {})
-    fetch("/api/models").then((r) => r.json()).then((groups: ModelGroupData[]) => {
-      setModelGroups(groups)
-      if (!selectedEntry && groups.length > 0) {
-        const initial = findModelEntry(groups, defaultModel ?? "", defaultProvider) ?? groups[0].models[0]
-        setSelectedEntry(initial ?? null)
-      }
-    }).catch(() => {})
+    if (!cachedSkills) {
+      fetch("/api/skills").then((r) => r.json()).then((data: SkillInfo[]) => { cachedSkills = data; setSkills(data) }).catch(() => {})
+    }
+    if (!cachedModelGroups) {
+      fetch("/api/models").then((r) => r.json()).then((groups: ModelGroupData[]) => {
+        cachedModelGroups = groups
+        setModelGroups(groups)
+        if (groups.length > 0) {
+          const initial = findModelEntry(groups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider) ?? groups[0].models[0]
+          setSelectedEntry(initial)
+        }
+      }).catch(() => {})
+    }
   }, [])
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -117,17 +119,6 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
-  if (!selectedEntry) {
-    return (
-      <div className="w-full">
-        <div className="flex h-12 items-center justify-center text-xs text-muted-foreground">Loading models...</div>
-      </div>
-    )
-  }
-
-  const currentMode = modes.find((m) => m.value === mode)!
-  const borderColor = currentMode.color
-
   function handleSubmit() {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
@@ -136,7 +127,7 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
       if (skills.some((s) => s.slug === slug)) skillSlugs.push(slug)
       return ""
     })
-    onSubmit?.(trimmed, mode, selectedEntry!.id, attachments.length > 0 ? attachments : undefined, selectedEntry!.provider, skillSlugs)
+    onSubmit?.(trimmed, selectedEntry!.id, attachments.length > 0 ? attachments : undefined, selectedEntry!.provider, skillSlugs)
     setValue("")
     setAttachments([])
     if (textareaRef.current) {
@@ -176,13 +167,6 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
       }
       if (e.key === "Escape") { setSkillSearch(null); setSkillCursor(0); return }
     }
-    if (e.key === "Tab" && e.target === textareaRef.current) {
-      e.preventDefault()
-      setMode((prev) => {
-        const idx = modes.findIndex((m) => m.value === prev)
-        return modes[(idx + 1) % modes.length].value
-      })
-    }
     if (e.key === "Enter" && !e.shiftKey && !showSkillSuggestions) {
       e.preventDefault()
       handleSubmit()
@@ -206,15 +190,8 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
       )}
       <div
         className="relative flex flex-col rounded-xl border bg-sidebar p-4 pb-3 pt-2 shadow-sm"
-        style={{ borderLeft: `2px solid ${borderColor}` }}
+        style={{ borderLeft: "2px solid #008080" }}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={handleFileSelect}
-          className="hidden"
-        />
         <div className="relative">
           <textarea
             ref={textareaRef}
@@ -248,7 +225,7 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
                   onMouseDown={(e) => { e.preventDefault(); selectSkill(s) }}
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${i === skillCursor ? "bg-white/10" : ""}`}
                 >
-                  <Scroll size={14} style={{ color: borderColor }} />
+                  <Scroll size={14} style={{ color: "#008080" }} />
                   <span className="text-foreground">{s.slug}</span>
                   <span className="ml-auto text-xs text-muted-foreground">@{s.slug}</span>
                 </button>
@@ -258,16 +235,69 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
         </div>
         <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-            >
-              <Paperclip size={14} />
-            </button>
-            <span className="text-xs font-medium" style={{ color: borderColor }}>
-              {currentMode.label}
-            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  disabled={disabled}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                >
+                  <Plus size={14} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44">
+                <DropdownMenuItem
+                  onSelect={() => fileInputRef.current?.click()}
+                >
+                  <Paperclip size={14} className="mr-2" />
+                  <span>Upload files</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    const ta = textareaRef.current
+                    if (ta) {
+                      const before = value.slice(0, ta.selectionStart)
+                      const after = value.slice(ta.selectionStart)
+                      const newVal = before + "@image " + after
+                      setValue(newVal)
+                      React.startTransition(() => {
+                        const pos = before.length + 7
+                        ta.setSelectionRange(pos, pos)
+                        ta.focus()
+                      })
+                    }
+                  }}
+                >
+                  <ImageIcon size={14} className="mr-2" />
+                  <span>Create image</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    const ta = textareaRef.current
+                    if (ta) {
+                      const before = value.slice(0, ta.selectionStart)
+                      const after = value.slice(ta.selectionStart)
+                      const newVal = before + "@deep " + after
+                      setValue(newVal)
+                      React.startTransition(() => {
+                        const pos = before.length + 6
+                        ta.setSelectionRange(pos, pos)
+                        ta.focus()
+                      })
+                    }
+                  }}
+                >
+                  <Brain size={14} className="mr-2" />
+                  <span>Deep think</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
           </div>
 
           <div className="flex items-center gap-2">
@@ -334,7 +364,7 @@ export function PromptInput({ onSubmit, disabled, defaultMode, defaultModel, def
             {value.trim() && (
               <button
                 onClick={disabled ? () => useNightCodeStore.getState().cancelStream() : handleSubmit}
-                className="flex size-7 items-center justify-center rounded-full bg-[#0099ff] text-white transition-all hover:bg-[#0099ff]/90 disabled:opacity-50"
+                className="flex size-7 items-center justify-center rounded-full bg-[#008080] text-white transition-all hover:bg-[#008080]/90 disabled:opacity-50"
               >
                 {disabled ? <StopCircle size={14} /> : <ArrowUp size={14} />}
               </button>

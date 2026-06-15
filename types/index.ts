@@ -1,5 +1,3 @@
-export type PromptMode = "chat" | "plan" | "build"
-
 export type MessageStatus = "streaming" | "complete" | "error" | "interrupted"
 
 export interface AttachmentData {
@@ -38,12 +36,12 @@ export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
-  mode: PromptMode
   toolStates: Record<string, ToolState>
   artifacts: Artifact[]
   status: MessageStatus
   hasError: boolean
   attachments?: AttachmentData[]
+  imageUrl?: string
 }
 
 export interface Chat {
@@ -51,22 +49,28 @@ export interface Chat {
   title: string
   messages: Message[]
   createdAt: number
-  mode: PromptMode
   model: string
   provider: string
   updatedAt: number
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter"
 
 export type View = "chat" | "settings" | "projects"
 
 export interface SkillInfo {
   slug: string
   title: string
+  description?: string
 }
 
 export interface AppSettings {
   theme: "dark" | "light"
   primaryColor: string
+  defaultModel: string
+  defaultProvider: string
+  temperature: number
+  maxTokens: number
+  soundEnabled: boolean
+  enterToSend: boolean
 }

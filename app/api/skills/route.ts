@@ -13,8 +13,22 @@ export async function GET() {
     const skills = files.map((f) => {
       const slug = f.replace(/\.md$/, "")
       const content = fs.readFileSync(path.join(SKILLS_DIR, f), "utf-8")
-      const title = content.split("\n")[0]?.replace(/^#{1,6}\s*/, "").trim() || slug
-      return { slug, title }
+      const lines = content.split("\n")
+      const title = lines[0]?.replace(/^#{1,6}\s*/, "").trim() || slug
+      const descLines: string[] = []
+      let inDesc = false
+      for (const line of lines.slice(1)) {
+        const trimmed = line.trim()
+        if (!trimmed) {
+          if (inDesc) break
+          continue
+        }
+        if (trimmed.startsWith("#") || trimmed.startsWith("###") || trimmed.startsWith("##")) break
+        if (!inDesc) inDesc = true
+        descLines.push(trimmed)
+      }
+      const description = descLines.length > 0 ? descLines.join(" ") : undefined
+      return { slug, title, description }
     })
     return NextResponse.json(skills)
   } catch {

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "win-control-mcp",
+    "type": "local",
+    "command": "python F:\\win-mcp\\win_control_mcp.py",
+    "args": [],
+    "url": "",
+    "environment": {},
+    "enabled": true
+  },
+  {
+    "name": "Gmail-mcp",
+    "type": "local",
+    "command": "python F:\\win-mcp\\gmail_mcp.py",
+    "args": [],
+    "url": "",
+    "environment": {},
+    "enabled": true
+  }
+]

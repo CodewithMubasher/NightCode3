@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import { PromptInput } from "@/components/prompt-input"
-import type { PromptMode, AttachmentData } from "@/types"
+import type { AttachmentData } from "@/types"
 
 export default function ChatPage() {
   const params = useParams()
@@ -21,8 +21,8 @@ export default function ChatPage() {
 
   if (!chat) return null
 
-  function handleSubmit(content: string, mode: PromptMode, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) {
-    sendMessage(id, content, mode, skills)
+  function handleSubmit(content: string, model: string, attachments?: AttachmentData[], provider?: string, skills?: string[]) {
+    sendMessage(id, content, skills, attachments, model, provider)
   }
 
   return (
@@ -44,7 +44,6 @@ export default function ChatPage() {
           <PromptInput
             onSubmit={handleSubmit}
             disabled={isStreaming}
-            defaultMode={chat.mode}
             defaultModel={chat.model}
             defaultProvider={chat.provider}
           />

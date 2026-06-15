@@ -3,12 +3,37 @@
 import * as React from "react"
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { useTheme } from "next-themes"
-import { Sun, Moon, Gift, FileText } from "lucide-react"
+import { Gift, FileText, Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Context,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextReasoningUsage,
+} from "@/components/ai-elements/context"
+import { useNightCodeStore } from "@/store/nightcode-store"
+
+const MODEL_MAX_TOKENS: Record<string, number> = {
+  "big-pickle": 200000,
+  "deepseek-v4-flash": 128000,
+  "deepseek-v4-pro": 128000,
+}
 
 export function TopHeader() {
   const { resolvedTheme, setTheme } = useTheme()
   const { state: sidebarState } = useSidebar()
+  const activeChat = useNightCodeStore((s) => {
+    if (!s.activeChatId) return null
+    return s.chats.find((c) => c.id === s.activeChatId) ?? null
+  })
+
+  const modelId = activeChat?.model ?? "big-pickle"
+  const maxTokens = MODEL_MAX_TOKENS[modelId] ?? 128000
+  const usedTokens = activeChat?.messages.reduce((acc, m) => acc + m.content.length, 0) ?? 0
 
   function togglePanel() {
     window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
@@ -24,6 +49,17 @@ export function TopHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1">
+        <Context usedTokens={usedTokens} maxTokens={maxTokens} modelId={modelId}>
+          <ContextTrigger />
+          <ContextContent align="end" side="bottom">
+            <ContextContentHeader />
+            <ContextContentBody>
+              <ContextInputUsage />
+              <ContextOutputUsage />
+              <ContextReasoningUsage />
+            </ContextContentBody>
+          </ContextContent>
+        </Context>
         <Button variant="ghost" size="icon-sm" onClick={togglePanel}>
           <FileText size={16} />
         </Button>

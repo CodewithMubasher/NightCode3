@@ -51,6 +51,16 @@ export async function plan(
   modelId: string,
   signal?: AbortSignal
 ): Promise<PlannerOutput> {
+  if (provider === "puter") {
+    const { default: puter } = await import("@heyputer/puter.js")
+    const response = await puter.ai.chat(
+      messages.map((m) => ({ role: m.role, content: m.content })),
+      { model: modelId, temperature: 0.3 }
+    )
+    const text = (typeof response.message?.content === "string" ? response.message.content : "") || ""
+    return parsePlannerOutput(text)
+  }
+
   const model = getLanguageModel(provider, modelId)
 
   const result = await generateText({
@@ -67,6 +77,18 @@ export async function plan(
 
 function parsePlannerOutput(text: string): PlannerOutput {
   const cleaned = text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?\s*```$/, "").trim()
+
+  // Try direct JSON parse first (entire output is a valid action JSON)
+  try {
+    const parsed = JSON.parse(cleaned)
+    const action = (parsed.action || "").replace(/toolcall/i, "tool_call").replace(/_/g, "")
+    if (action === "respond" && typeof parsed.content === "string") {
+      return { action: "respond", content: parsed.content }
+    }
+    if ((action === "toolcall" || action === "tool_call") && parsed.tool) {
+      return { action: "tool_call", tool: parsed.tool, args: parsed.args ?? {} }
+    }
+  } catch {}
 
   const toolAliases: Record<string, string> = {
     createartifact: "create_artifact",
@@ -86,6 +108,8 @@ function parsePlannerOutput(text: string): PlannerOutput {
     executecommand: "execute_command",
     execute_command: "execute_command",
     think: "think",
+    generateimage: "generate_image",
+    generate_image: "generate_image",
   }
 
   let idx = 0

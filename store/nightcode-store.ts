@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, PromptMode, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings } from "@/types"
+import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings } from "@/types"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -11,8 +11,8 @@ function getChatTitle(content: string): string {
   return trimmed.length > 40 ? `${trimmed.slice(0, 40)}...` : trimmed
 }
 
-function emptyMessage(id: string, role: "user" | "assistant", mode: PromptMode, status: MessageStatus, attachments?: AttachmentData[]): Message {
-  return { id, role, content: "", mode, toolStates: {}, artifacts: [], status, hasError: false, attachments }
+function emptyMessage(id: string, role: "user" | "assistant", status: MessageStatus, attachments?: AttachmentData[]): Message {
+  return { id, role, content: "", toolStates: {}, artifacts: [], status, hasError: false, attachments }
 }
 
 interface NightCodeState {
@@ -21,12 +21,13 @@ interface NightCodeState {
   isStreaming: boolean
   settings: AppSettings
 
-  createChat: (mode: PromptMode, model?: string, provider?: string) => string
+  createChat: (model?: string, provider?: string) => string
   deleteChat: (id: string) => void
   setActiveChat: (id: string | null) => void
 
   addMessage: (chatId: string, message: Message) => void
   updateMessageContent: (chatId: string, messageId: string, content: string) => void
+  updateMessageImage: (chatId: string, messageId: string, imageUrl: string) => void
   updateToolState: (chatId: string, messageId: string, toolState: ToolState) => void
   updateMessageStatus: (chatId: string, messageId: string, status: MessageStatus) => void
   setMessageError: (chatId: string, messageId: string, error: boolean) => void
@@ -34,7 +35,7 @@ interface NightCodeState {
   deleteArtifact: (chatId: string, artifactId: string) => void
   renameChat: (id: string, title: string) => void
 
-  sendMessage: (chatId: string, content: string, mode: PromptMode, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
+  sendMessage: (chatId: string, content: string, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
   cancelStream: () => void
 
   setSettings: (settings: Partial<AppSettings>) => void
@@ -52,16 +53,21 @@ export const useNightCodeStore = create<NightCodeState>()(
       settings: {
         theme: "dark",
         primaryColor: "#FFFFFF",
+        defaultModel: "big-pickle",
+        defaultProvider: "opencode",
+        temperature: 0.7,
+        maxTokens: 4096,
+        soundEnabled: false,
+        enterToSend: true,
       },
 
-      createChat: (mode, model, provider) => {
+      createChat: (model, provider) => {
         const id = generateId()
         const now = Date.now()
         const chat: Chat = {
           id,
           title: "New Chat",
           messages: [],
-          mode,
           model: model ?? "big-pickle",
           provider: provider ?? "opencode",
           createdAt: now,
@@ -98,6 +104,22 @@ export const useNightCodeStore = create<NightCodeState>()(
                   ...c,
                   messages: c.messages.map((m) =>
                     m.id === messageId ? { ...m, content: m.content + content } : m
+                  ),
+                  updatedAt: Date.now(),
+                }
+              : c
+          ),
+        }))
+      },
+
+      updateMessageImage: (chatId, messageId, imageUrl) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === messageId ? { ...m, imageUrl } : m
                   ),
                   updatedAt: Date.now(),
                 }
@@ -195,7 +217,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         abortController = null
       },
 
-      sendMessage: async (chatId, content, mode, skills, attachments, model, provider) => {
+      sendMessage: async (chatId, content, skills, attachments, model, provider) => {
         const state = get()
         const chat = state.chats.find((c) => c.id === chatId)
         if (!chat) return
@@ -230,10 +252,10 @@ export const useNightCodeStore = create<NightCodeState>()(
           }
         }
 
-        const userMessage = emptyMessage(generateId(), "user", mode, "complete", attachments)
+        const userMessage = emptyMessage(generateId(), "user", "complete", attachments)
         userMessage.content = content
 
-        const assistantMessage = emptyMessage(generateId(), "assistant", mode, "streaming")
+        const assistantMessage = emptyMessage(generateId(), "assistant", "streaming")
         for (const ss of skillStates) {
           assistantMessage.toolStates[ss.id] = ss
         }
@@ -270,7 +292,6 @@ export const useNightCodeStore = create<NightCodeState>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               messages: messagePayload,
-              mode,
               chatId,
               messageId: assistantMessage.id,
               model: effectiveModel,
@@ -352,6 +373,11 @@ export const useNightCodeStore = create<NightCodeState>()(
                         window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
                       }
                     }
+                    break
+                  }
+                  case "image_generated": {
+                    const imageUrl = (parsed.payload?.imageUrl as string) ?? ""
+                    if (imageUrl) get().updateMessageImage(chatId, assistantMessage.id, imageUrl)
                     break
                   }
                   case "error": {

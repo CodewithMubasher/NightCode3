@@ -20,6 +20,7 @@ import {
   CirclePlus,
   FolderPlus,
   Bolt,
+  Wrench,
   Plus,
   EllipsisVertical,
   LogOut,
@@ -46,6 +47,7 @@ import { useNightCodeStore } from "@/store/nightcode-store"
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
   { icon: FolderPlus, label: "Projects", href: "/projects", isNav: true },
+  { icon: Wrench, label: "Customize", href: "/customize", isNav: true },
   { icon: Bolt, label: "Settings", href: "/settings", isNav: true },
   { icon: Blocks, label: "Artifacts", isNav: false },
 ]
