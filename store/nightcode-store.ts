@@ -320,8 +320,9 @@ export const useNightCodeStore = create<NightCodeState>()(
                     break
                   }
                   case "tool_start": {
+                    const toolCallId = (parsed.payload?.toolCallId as string) ?? `tool_${parsed.payload?.callNumber ?? 0}`
                     const ts: ToolState = {
-                      id: (parsed.payload?.tool as string) + "_" + (parsed.payload?.iteration ?? "0"),
+                      id: toolCallId,
                       tool: (parsed.payload?.tool as string) ?? "unknown",
                       args: (parsed.payload?.args as Record<string, unknown>) ?? {},
                       status: "running",
@@ -331,20 +332,21 @@ export const useNightCodeStore = create<NightCodeState>()(
                     break
                   }
                   case "tool_end": {
-                    const tool = (parsed.payload?.tool as string) ?? "unknown"
-                    const stateId = tool + "_" + (parsed.payload?.iteration ?? "0")
-                    const status = (parsed.payload?.status as ToolStatus) ?? "verified"
-                    const existing = get().chats.find((c) => c.id === chatId)
-                      ?.messages.find((m) => m.id === assistantMessage.id)
-                      ?.toolStates[stateId]
-                    if (existing) {
-                      get().updateToolState(chatId, assistantMessage.id, {
-                        ...existing,
-                        status,
-                        result: parsed.payload?.result as Record<string, unknown> | undefined,
-                        error: parsed.payload?.error as string | undefined,
-                        discrepancy: parsed.payload?.discrepancy as string | undefined,
-                      })
+                    const toolCallId = (parsed.payload?.toolCallId as string) ?? ""
+                    if (toolCallId) {
+                      const status = (parsed.payload?.status as ToolStatus) ?? "verified"
+                      const existing = get().chats.find((c) => c.id === chatId)
+                        ?.messages.find((m) => m.id === assistantMessage.id)
+                        ?.toolStates[toolCallId]
+                      if (existing) {
+                        get().updateToolState(chatId, assistantMessage.id, {
+                          ...existing,
+                          status,
+                          result: parsed.payload?.result as Record<string, unknown> | undefined,
+                          error: parsed.payload?.error as string | undefined,
+                          discrepancy: parsed.payload?.discrepancy as string | undefined,
+                        })
+                      }
                     }
                     break
                   }

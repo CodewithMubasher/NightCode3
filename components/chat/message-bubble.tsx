@@ -63,6 +63,7 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
   const textColor = isFailed ? "#EF4444" : "#E0E0E0"
 
   const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "skill"].includes(toolState.tool)
+  const isToolThink = toolState.tool === "think"
 
   const toolLabels: Record<string, (a: string | null) => string> = {
     write_file: () => "Created",
@@ -78,48 +79,50 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
   }
   const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
 
+  const thoughtText = toolState.args?.thought as string | undefined
+
   return (
-    <div className="relative flex items-center gap-1.5">
-      <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
-        {isRunning ? (
-          <div className="relative">
-            <div className="absolute inset-0 rounded-full animate-ping" style={{ background: "rgba(16,185,129,0.3)" }} />
-            <Icon className="size-3.5 relative" style={{ color: iconColor }} />
-          </div>
-        ) : (
-          <Icon className="size-3.5" style={{ color: iconColor }} />
-        )}
-      </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="text-[14px] font-sans" style={{ color: textColor }}>
-          {label}
-        </span>
-        {args && isFilePath && (
-          <span
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
-            style={{
-              background: "#1A1A1A",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: "#B3B3B3",
-            }}
-          >
-            <FileText className="size-3" style={{ color: "#B3B3B3" }} />
-            {args}
+    <div className="relative flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
+          <Icon className="size-3.5" style={{ color: isRunning ? "#10B981" : iconColor }} />
+        </div>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="text-[14px] font-sans" style={{ color: textColor }}>
+            {label}
           </span>
-        )}
-        {args && !isFilePath && (
-          <span
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
-            style={{
-              background: "#1A1A1A",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: "#B3B3B3",
-            }}
-          >
-            {args}
-          </span>
-        )}
+          {args && isFilePath && !isToolThink && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
+              style={{
+                background: "#1A1A1A",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#B3B3B3",
+              }}
+            >
+              <FileText className="size-3" style={{ color: "#B3B3B3" }} />
+              {args}
+            </span>
+          )}
+          {args && !isFilePath && !isToolThink && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
+              style={{
+                background: "#1A1A1A",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#B3B3B3",
+              }}
+            >
+              {args}
+            </span>
+          )}
+        </div>
       </div>
+      {isToolThink && thoughtText && (
+        <div className="ml-7 mr-2 rounded-md border border-white/10 bg-white/[0.03] p-2.5 text-[13px] leading-relaxed text-[#999] font-mono whitespace-pre-wrap">
+          {thoughtText}
+        </div>
+      )}
     </div>
   )
 }
@@ -204,6 +207,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           )}
 
           {expanded && <Timeline toolStates={message.toolStates} message={message} />}
+
           {message.content && (
             <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}

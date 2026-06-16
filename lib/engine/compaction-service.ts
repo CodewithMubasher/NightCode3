@@ -1,0 +1,145 @@
+import { generateText } from "ai"
+import type { AIProvider } from "@/types"
+import { getLanguageModel } from "./planner"
+import {
+  getStepsBySession,
+  getToolCallsBySession,
+  getToolResultsBySession,
+  getCompactionsBySession,
+  createCompaction,
+} from "@/lib/db/adapter"
+
+export interface CompactionSummary {
+  goal: string
+  progress: string[]
+  blockers: string[]
+  files: string[]
+  next: string[]
+}
+
+function generateId(): string {
+  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+export class CompactionService {
+  private stepCountSinceLastCompaction = 0
+  private readonly compactionInterval: number
+
+  constructor(
+    private sessionId: string,
+    private config: {
+      compactionInterval?: number
+    } = {}
+  ) {
+    this.compactionInterval = config.compactionInterval ?? 10
+  }
+
+  async onStepComplete(
+    stepNumber: number,
+    provider: AIProvider,
+    modelId: string
+  ): Promise<void> {
+    this.stepCountSinceLastCompaction++
+
+    if (this.stepCountSinceLastCompaction < this.compactionInterval) return
+
+    await this.compact(stepNumber, provider, modelId)
+    this.stepCountSinceLastCompaction = 0
+  }
+
+  private async compact(
+    currentStepNumber: number,
+    provider: AIProvider,
+    modelId: string
+  ): Promise<void> {
+    const lastCompactions = getCompactionsBySession(this.sessionId)
+    const lastCompactedStep = lastCompactions.length > 0
+      ? lastCompactions[lastCompactions.length - 1].step_range_end
+      : 0
+
+    const steps = getStepsBySession(this.sessionId)
+    const newSteps = steps.filter((s) => s.step_number > lastCompactedStep)
+    if (newSteps.length === 0) return
+
+    const toolCalls = getToolCallsBySession(this.sessionId)
+    const toolResults = getToolResultsBySession(this.sessionId)
+
+    const stepData = newSteps.map((s) => ({
+      step: s.step_number,
+      finish_reason: s.finish_reason,
+      tools: toolCalls
+        .filter((tc) => tc.step_id === s.id)
+        .map((tc) => {
+          let args: unknown
+          try { args = JSON.parse(tc.args) } catch { args = tc.args }
+          const resultData = toolResults.find((tr) => tr.tool_call_id === tc.id)?.data
+          let result: unknown = null
+          if (resultData) {
+            try { result = JSON.parse(resultData) } catch { result = resultData }
+          }
+          return {
+            tool: tc.tool_name,
+            args,
+            status: tc.status,
+            result,
+          }
+        }),
+    }))
+
+    const summary = await this.summarizeSteps(stepData, provider, modelId)
+
+    createCompaction({
+      id: generateId(),
+      session_id: this.sessionId,
+      step_range_start: lastCompactedStep + 1,
+      step_range_end: currentStepNumber,
+      summary: JSON.stringify(summary),
+      created_at: Date.now(),
+    })
+
+    console.log(`[compaction] Compacted steps ${lastCompactedStep + 1}-${currentStepNumber}`)
+  }
+
+  private async summarizeSteps(
+    stepData: unknown[],
+    provider: AIProvider,
+    modelId: string
+  ): Promise<CompactionSummary> {
+    const model = getLanguageModel(provider, modelId)
+
+    const prompt = `You are a session compactor. Analyze the following agent execution steps and produce a concise structured summary.
+
+Respond with ONLY valid JSON matching this schema:
+{
+  "goal": "What was the agent trying to achieve in these steps (one sentence)",
+  "progress": ["concrete accomplishment 1", "accomplishment 2"],
+  "blockers": ["any error or obstacle encountered"],
+  "files": ["path/to/file1", "path/to/file2"],
+  "next": ["what the agent planned to do next"]
+}
+
+Steps data:
+${JSON.stringify(stepData, null, 2)}`
+
+    try {
+      const result = await generateText({
+        model,
+        messages: [
+          { role: "system", content: "You are a session compactor. Output only valid JSON. No other text." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+      })
+
+      return JSON.parse(result.text) as CompactionSummary
+    } catch {
+      return {
+        goal: "Agent execution steps",
+        progress: [`Completed ${stepData.length} steps`],
+        blockers: [],
+        files: [],
+        next: [],
+      }
+    }
+  }
+}
