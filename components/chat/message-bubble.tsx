@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import type { Message, ToolState } from "@/types"
 import {
   Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
-  CheckCircle2, ChevronDown, ChevronRight, Circle,
+  CheckCircle2, ChevronDown, Circle,
   FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable,
 } from "lucide-react"
 import {
@@ -27,6 +27,9 @@ function toolIcon(toolName: string) {
     case "execute_command": return Terminal
     case "think": return Brain
     case "create_artifact": return FilePen
+    case "edit_artifact": return FilePen
+    case "list_artifacts": return List
+    case "read_artifact": return FileText
     case "create_folder": return FolderCheck
     case "skill": return BookOpen
     default: return Circle
@@ -51,9 +54,10 @@ function toolArgs(toolState: ToolState): string | null {
 
 interface ToolTimelineItemProps {
   toolState: ToolState
+  iconDelay?: number
 }
 
-function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
+function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   const Icon = toolIcon(toolState.tool)
   const args = toolArgs(toolState)
   const isRunning = toolState.status === "running"
@@ -62,7 +66,7 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
   const iconColor = isFailed ? "#EF4444" : "#B3B3B3"
   const textColor = isFailed ? "#EF4444" : "#E0E0E0"
 
-  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "skill"].includes(toolState.tool)
+  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
   const isToolThink = toolState.tool === "think"
 
   const toolLabels: Record<string, (a: string | null) => string> = {
@@ -70,7 +74,10 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
     create_folder: () => "Created folder",
     delete_file: () => "Deleted",
     read_file: () => "Read",
-    create_artifact: (a) => a ?? "Created document",
+    create_artifact: () => "Created Artifact",
+    list_artifacts: () => "Listed artifacts",
+    read_artifact: (a) => a ?? "Read artifact",
+    edit_artifact: (a) => a ?? "Edited artifact",
     list_directory: (a) => a ? `Listed ${a}` : "Listed directory",
     search_files: () => "Searched files",
     execute_command: (a) => a ? `Ran: ${a}` : "Ran command",
@@ -85,7 +92,7 @@ function ToolTimelineItem({ toolState }: ToolTimelineItemProps) {
     <div className="relative flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
         <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
-          <Icon className="size-3.5" style={{ color: isRunning ? "#10B981" : iconColor }} />
+          <Icon className="size-3.5" style={{ color: isRunning && toolState.tool !== "create_artifact" ? "#10B981" : iconColor }} />
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="text-[14px] font-sans" style={{ color: textColor }}>
@@ -131,17 +138,46 @@ function Timeline({ toolStates, message }: { toolStates: Record<string, ToolStat
   const entries = Object.values(toolStates)
   if (entries.length === 0) return null
 
+  const stagger = 150
+  const lineDelay = entries.length * stagger + 200
+
   return (
     <div className="relative py-2">
-      <div className="absolute left-[10px] top-2 bottom-2 w-px bg-white/10" style={{ zIndex: 0 }} />
+      <div
+        className="absolute left-[10px] top-2 bottom-2 w-px bg-white/10"
+        style={{
+          zIndex: 0,
+          transformOrigin: "top",
+          transform: "scaleY(0)",
+          animation: "cinematic-line-draw 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards",
+          animationDelay: `${lineDelay}ms`,
+        }}
+      />
       <div className="relative space-y-0" style={{ zIndex: 1 }}>
-        {entries.map((ts) => (
-          <div key={ts.id} className="pb-2">
-            <ToolTimelineItem toolState={ts} />
+        {entries.map((ts, i) => (
+          <div
+            key={ts.id}
+            className="pb-2"
+            style={{
+              opacity: 0,
+              transform: "translateY(15px)",
+              animation: "cinematic-step-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+              animationDelay: `${i * stagger}ms`,
+            }}
+          >
+            <ToolTimelineItem toolState={ts} iconDelay={i * stagger + 60} />
           </div>
         ))}
         {message.status !== "streaming" && (
-          <div className="flex items-center gap-1.5">
+          <div
+            className="flex items-center gap-1.5"
+            style={{
+              opacity: 0,
+              transform: "translateY(10px)",
+              animation: "cinematic-step-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+              animationDelay: `${entries.length * stagger + 100}ms`,
+            }}
+          >
             <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
               <CheckCircle2 className="size-3.5 text-emerald-500" />
             </div>
@@ -163,8 +199,18 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const toolCount = Object.keys(message.toolStates).length
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const [expanded, setExpanded] = useState(isStreamingTool)
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const [contentHeight, setContentHeight] = useState(0)
 
-  useEffect(() => { if (isStreamingTool) setExpanded(true) }, [isStreamingTool])
+  useEffect(() => {
+    if (isStreamingTool) setExpanded(true)
+  }, [isStreamingTool])
+
+  useEffect(() => {
+    if (timelineRef.current) {
+      setContentHeight(timelineRef.current.scrollHeight)
+    }
+  }, [message.toolStates])
 
   if (message.role === "user") {
     return (
@@ -199,14 +245,31 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {toolCount > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="flex items-center gap-1.5 py-1 text-sm font-sans text-[#B3B3B3] hover:text-white transition-colors"
+              className="flex items-center gap-1.5 py-1 text-sm font-sans text-[#B3B3B3] hover:text-white transition-colors duration-150"
             >
               Activities ({toolCount})
-              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <ChevronDown
+                size={14}
+                style={{
+                  transition: "transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)",
+                  transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
+                }}
+              />
             </button>
           )}
 
-          {expanded && <Timeline toolStates={message.toolStates} message={message} />}
+          <div
+            style={{
+              overflow: "hidden",
+              transition: `max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)`,
+              maxHeight: expanded ? `${contentHeight}px` : "0px",
+              opacity: expanded ? 1 : 0,
+            }}
+          >
+            <div ref={timelineRef}>
+              <Timeline toolStates={message.toolStates} message={message} />
+            </div>
+          </div>
 
           {message.content && (
             <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>

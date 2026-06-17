@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -19,7 +20,6 @@ import {
   Eclipse,
   CirclePlus,
   FolderPlus,
-  Bolt,
   Wrench,
   Plus,
   Box,
@@ -50,17 +50,18 @@ const navItems = [
   { icon: Box, label: "Agent Studio", href: "/studio", isNav: true },
   { icon: FolderPlus, label: "Projects", href: "/projects", isNav: true },
   { icon: Wrench, label: "Customize", href: "/customize", isNav: true },
-  { icon: Bolt, label: "Settings", href: "/settings", isNav: true },
   { icon: Blocks, label: "Artifacts", isNav: false },
 ]
 
 export function AppSidebar() {
   const router = useRouter()
+  const [hydrated, setHydrated] = React.useState(false)
+  React.useEffect(() => { setHydrated(true) }, [])
   const chats = useNightCodeStore((s) => s.chats)
 
-  const recentChats = [...chats]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 15)
+  const recentChats = hydrated
+    ? [...chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 15)
+    : []
 
   return (
     <Sidebar collapsible="offcanvas">

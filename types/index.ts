@@ -34,7 +34,7 @@ export interface Artifact {
 
 export interface Message {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "system"
   content: string
   toolStates: Record<string, ToolState>
   artifacts: Artifact[]
@@ -53,7 +53,7 @@ export interface Chat {
   updatedAt: number
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama"
 
 export type View = "chat" | "settings" | "projects"
 
@@ -61,6 +61,21 @@ export interface SkillInfo {
   slug: string
   title: string
   description?: string
+}
+
+export interface AskOption {
+  label: string
+  value: string
+}
+
+export interface AskQuestion {
+  id: string
+  question: string
+  options: AskOption[]
+}
+
+export interface AskData {
+  questions: AskQuestion[]
 }
 
 export interface AppSettings {

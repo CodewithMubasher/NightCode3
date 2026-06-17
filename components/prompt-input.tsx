@@ -307,7 +307,8 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                       models: g.models.filter(
                         (m) =>
                           m.display_name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-                          m.id.toLowerCase().includes(modelSearch.toLowerCase()),
+                          m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
+                          g.label.toLowerCase().includes(modelSearch.toLowerCase()),
                       ),
                     }))
                     .filter((g) => g.models.length > 0)

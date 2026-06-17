@@ -7,6 +7,8 @@ import { searchFilesTool } from "./search-files"
 import { executeCommandTool } from "./execute-command"
 import { thinkTool } from "./think"
 import { createArtifactTool } from "./create-artifact"
+import { askTool } from "./ask"
+import { listArtifactsTool, readArtifactTool, editArtifactTool } from "./artifact-tools"
 
 export interface ToolImplementation {
   name: string
@@ -39,4 +41,8 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   execute_command: executeCommandTool,
   think: thinkTool,
   create_artifact: createArtifactTool,
+  ask: askTool,
+  list_artifacts: listArtifactsTool,
+  read_artifact: readArtifactTool,
+  edit_artifact: editArtifactTool,
 }

@@ -73,9 +73,15 @@ function buildZodSchema(schema: Record<string, string>): z.ZodObject<any> {
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
+export interface UsageInfo {
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens?: number
+}
+
 export type StepResult =
-  | { type: "text"; content: string }
-  | { type: "tool_calls"; text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }> }
+  | { type: "text"; content: string; usage?: UsageInfo }
+  | { type: "tool_calls"; text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage?: UsageInfo }
 
 export type PlannerCallbacks = {
   onText?: (text: string) => void
@@ -93,8 +99,35 @@ export async function planStep(
   modelId: string,
   availableTools: ToolImplementation[],
   callbacks: PlannerCallbacks,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemPrompt?: string
 ): Promise<StepResult> {
+  // Ollama Cloud — native Ollama API
+  if (provider === "ollama") {
+    try {
+      const res = await fetch("https://ollama.com/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OLLAMA_CLOUD_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          stream: false,
+        }),
+        signal,
+      })
+      if (!res.ok) throw new Error(`Ollama API error: ${res.status}`)
+      const json = await res.json()
+      const content = json.message?.content || ""
+      return { type: "text", content }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      return { type: "text", content: `Ollama Cloud error: ${msg}` }
+    }
+  }
+
   // Puter fallback — unchanged
   if (provider === "puter") {
     try {
@@ -125,11 +158,47 @@ export async function planStep(
     })
   }
 
-  try {
+  // ── Retry helper with exponential backoff ────────────────────────────────
+  async function retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    options: { maxRetries?: number; baseDelayMs?: number; signal?: AbortSignal } = {}
+  ): Promise<T> {
+    const { maxRetries = 3, baseDelayMs = 1000 } = options
+    let lastErr: Error | null = null
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1)
+        console.log(`[planner] Retry attempt ${attempt}/${maxRetries} after ${delay}ms`)
+        await new Promise((r) => {
+          const timer = setTimeout(r, delay)
+          if (signal) {
+            signal.addEventListener("abort", () => { clearTimeout(timer); r(undefined) }, { once: true })
+          }
+        })
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+      }
+      try {
+        return await fn()
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err))
+        // Only retry on rate limit or server errors
+        const status = (err as any)?.status ?? (err as any)?.response?.status
+        if (status && status !== 429 && status < 500) throw lastErr
+        if (attempt >= maxRetries) throw lastErr
+      }
+    }
+    throw lastErr ?? new Error("Retry failed")
+  }
+
+  async function doStreamText(
+    messages: Array<{ role: string; content: unknown }>,
+    tools: Record<string, unknown> | undefined
+  ): Promise<{ text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage: UsageInfo | undefined }> {
     const result = streamText({
       model,
+      system: systemPrompt,
       messages: messages as any,
-      tools: sdkTools as ToolSet,
+      tools: tools as ToolSet | undefined,
       temperature: 0.3,
       abortSignal: signal,
       onChunk: ({ chunk }) => {
@@ -139,7 +208,6 @@ export async function planStep(
       },
     })
 
-    // Collect tool calls and text from the stream
     const collectedToolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }> = []
     let collectedText = ""
 
@@ -157,38 +225,46 @@ export async function planStep(
       }
     }
 
-    if (collectedToolCalls.length > 0) {
-      return { type: "tool_calls", text: collectedText, toolCalls: collectedToolCalls }
+    const usage: UsageInfo | undefined = await (async () => {
+      try {
+        const u = await (result.usage as Promise<any>)
+        if (u?.inputTokens != null || u?.outputTokens != null) {
+          return { inputTokens: u.inputTokens ?? 0, outputTokens: u.outputTokens ?? 0, reasoningTokens: u.reasoningTokens }
+        }
+      } catch {}
+      return undefined
+    })()
+
+    return { text: collectedText, toolCalls: collectedToolCalls, usage }
+  }
+
+  try {
+    const result = await retryWithBackoff(
+      () => doStreamText(messages, sdkTools),
+      { signal }
+    )
+
+    if (result.toolCalls.length > 0) {
+      return { type: "tool_calls", text: result.text, toolCalls: result.toolCalls, usage: result.usage }
     }
 
-    return { type: "text", content: collectedText }
+    return { type: "text", content: result.text, usage: result.usage }
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error"
     console.error(`[planner] Tool calling failed: ${msg}. Retrying without tools.`)
 
-    // Fallback: text-only request for providers without native tool support
-    const fallback = streamText({
-      model,
-      messages: messages as any,
-      temperature: 0.3,
-      abortSignal: signal,
-      onChunk: ({ chunk }) => {
-        if (chunk.type === "text-delta" && callbacks.onText) {
-          callbacks.onText(chunk.text)
-        }
-      },
-    })
-
-    let text = ""
-    for await (const chunk of fallback.fullStream) {
-      if (chunk.type === "text-delta") {
-        text += chunk.text
-      } else if (chunk.type === "error") {
-        throw chunk.error
-      }
+    // Fallback: text-only request with retry
+    try {
+      const fallbackResult = await retryWithBackoff(
+        () => doStreamText(messages, undefined),
+        { signal }
+      )
+      return { type: "text", content: fallbackResult.text, usage: fallbackResult.usage }
+    } catch (fallbackErr) {
+      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : "Unknown error"
+      console.error(`[planner] Fallback also failed: ${fallbackMsg}`)
+      return { type: "text", content: `LLM request failed: ${fallbackMsg}` }
     }
-
-    return { type: "text", content: text }
   }
 }

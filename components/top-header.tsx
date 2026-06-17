@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useTheme } from "next-themes"
 import { Gift, FileText, Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,29 +11,120 @@ import {
   ContextContent,
   ContextContentHeader,
   ContextContentBody,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextReasoningUsage,
 } from "@/components/ai-elements/context"
-import { useNightCodeStore } from "@/store/nightcode-store"
+import { getUsageSummary, type ProviderModelStats } from "@/lib/usage-tracker"
 
-const MODEL_MAX_TOKENS: Record<string, number> = {
-  "big-pickle": 200000,
-  "deepseek-v4-flash": 128000,
-  "deepseek-v4-pro": 128000,
+function LimitBar({ current, limit, label }: { current: number; limit: number | null; label: string }) {
+  const pct = limit && limit > 0 ? Math.min(current / limit, 1) : 0
+  const color = pct >= 0.9 ? "bg-red-500" : pct >= 0.7 ? "bg-yellow-500" : "bg-[#008080]"
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-1.5">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="h-1.5 rounded-full bg-muted">
+        {limit != null && <div className={`h-full rounded-full ${color}`} style={{ width: `${pct * 100}%` }} />}
+      </div>
+      <span className="font-mono text-foreground">
+        {current.toLocaleString()}{limit != null ? ` / ${limit.toLocaleString()}` : ""}
+      </span>
+    </div>
+  )
+}
+
+function ProviderUsageSection() {
+  const [stats, setStats] = React.useState<ProviderModelStats[]>([])
+
+  React.useEffect(() => {
+    function refresh() {
+      setStats(getUsageSummary())
+    }
+    refresh()
+    const interval = setInterval(refresh, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (stats.length === 0) return null
+
+  const byProvider = new Map<string, ProviderModelStats[]>()
+  for (const s of stats) {
+    const arr = byProvider.get(s.provider) ?? []
+    arr.push(s)
+    byProvider.set(s.provider, arr)
+  }
+
+  return (
+    <div className="space-y-3">
+      <span className="text-[11px] font-medium text-muted-foreground">Provider Rate Limits</span>
+      {Array.from(byProvider.entries()).map(([provider, models]) => (
+        <div key={provider}>
+          <div className="mb-1.5 text-xs font-medium text-foreground">{provider}</div>
+          <div className="space-y-1.5">
+            {models.map((m) => (
+              <div key={m.model} className="rounded-md bg-muted/50 p-2 text-[11px]">
+                <div className="mb-1.5 font-medium text-foreground">{m.model}</div>
+                <div className="space-y-1.5">
+                  <LimitBar current={m.rpm} limit={m.limitRpm} label="RPM" />
+                  <LimitBar current={m.tpm} limit={m.limitTpm} label="TPM" />
+                  <LimitBar current={m.rpd} limit={m.limitRpd} label="RPD" />
+                  <LimitBar current={m.tpd} limit={m.limitTpd} label="TPD" />
+                </div>
+                <div className="mt-1.5 flex justify-between text-muted-foreground">
+                  <span>Total Requests</span>
+                  <span className="font-mono text-foreground">{m.totalRequests}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function useTpdTotals(): [number, number] {
+  const [totalReq, setTotalReq] = React.useState(0)
+  const [totalRpd, setTotalRpd] = React.useState(0)
+
+  React.useEffect(() => {
+    function refresh() {
+      const stats = getUsageSummary()
+      let req = 0
+      let rpd = 0
+      const seenProviders = new Set<string>()
+      for (const s of stats) {
+        req += s.totalRequests
+        if (!seenProviders.has(s.provider)) {
+          if (s.limitRpd != null) rpd += s.limitRpd
+          seenProviders.add(s.provider)
+        }
+      }
+      setTotalReq(req)
+      setTotalRpd(rpd)
+    }
+    refresh()
+    const interval = setInterval(refresh, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return [totalReq, totalRpd]
 }
 
 export function TopHeader() {
   const { resolvedTheme, setTheme } = useTheme()
-  const { state: sidebarState } = useSidebar()
-  const activeChat = useNightCodeStore((s) => {
-    if (!s.activeChatId) return null
-    return s.chats.find((c) => c.id === s.activeChatId) ?? null
-  })
+  const [totalReq, totalRpd] = useTpdTotals()
+  const [hasStats, setHasStats] = React.useState(false)
 
-  const modelId = activeChat?.model ?? "big-pickle"
-  const maxTokens = MODEL_MAX_TOKENS[modelId] ?? 128000
-  const usedTokens = activeChat?.messages.reduce((acc, m) => acc + m.content.length, 0) ?? 0
+  React.useEffect(() => {
+    function refresh() {
+      const stats = getUsageSummary()
+      setHasStats(stats.length > 0)
+    }
+    refresh()
+    const interval = setInterval(refresh, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const used = totalReq
+  const max = totalRpd || 1
 
   function togglePanel() {
     window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
@@ -49,15 +140,15 @@ export function TopHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <Context usedTokens={usedTokens} maxTokens={maxTokens} modelId={modelId}>
+        <Context usedTokens={used} maxTokens={max}>
           <ContextTrigger />
-          <ContextContent align="end" side="bottom">
+          <ContextContent align="end" side="bottom" className="min-w-72">
             <ContextContentHeader />
-            <ContextContentBody>
-              <ContextInputUsage />
-              <ContextOutputUsage />
-              <ContextReasoningUsage />
-            </ContextContentBody>
+            {hasStats && (
+              <ContextContentBody>
+                <ProviderUsageSection />
+              </ContextContentBody>
+            )}
           </ContextContent>
         </Context>
         <Button variant="ghost" size="icon-sm" onClick={togglePanel}>

@@ -33,8 +33,16 @@ export async function connectMCP(config: MCPConfig): Promise<string[]> {
       version: "1.0.0",
     })
 
-    await client.connect(transport)
-    const toolsResult = await client.listTools()
+    const timeoutMs = 10_000
+    const connectPromise = client.connect(transport)
+    const toolsPromise = connectPromise.then(() => client.listTools())
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`MCP connection timed out after ${timeoutMs}ms`)), timeoutMs)
+      // Clean up timer if the other promise settles first
+      Promise.race([connectPromise, toolsPromise]).finally(() => clearTimeout(timer))
+    })
+
+    const toolsResult = await Promise.race([toolsPromise, timeoutPromise])
     const toolNames = (toolsResult.tools ?? []).map((t) => t.name)
 
     connections.set(config.name, { config, client })
@@ -79,3 +87,10 @@ export function getAllConnectionStatuses(configs: MCPConfig[]): Record<string, "
   }
   return statuses
 }
+
+// Cleanup all MCP processes on server shutdown
+async function shutdown() {
+  await disconnectAll()
+}
+process.on("SIGINT", async () => { await shutdown(); process.exit(0) })
+process.on("SIGTERM", async () => { await shutdown(); process.exit(0) })

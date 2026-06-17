@@ -15,18 +15,29 @@ interface SuggestionPillsProps {
 
 export function SuggestionPills({ onSelect, disabled }: SuggestionPillsProps) {
   return (
-    <div className="flex items-center justify-center gap-2">
-      {SUGGESTIONS.map(({ icon: Icon, label, prompt }) => (
-        <button
-          key={label}
-          onClick={() => onSelect?.(prompt)}
-          disabled={disabled}
-          className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-sidebar px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-white/20 hover:text-foreground disabled:opacity-50"
-        >
-          <Icon size={14} />
-          {label}
-        </button>
-      ))}
-    </div>
+    <>
+      <style>{`
+        @keyframes pill-in {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <div className="flex items-center justify-center gap-2">
+        {SUGGESTIONS.map(({ icon: Icon, label, prompt }, i) => (
+          <button
+            key={label}
+            onClick={() => onSelect?.(prompt)}
+            disabled={disabled}
+            style={{
+              animation: `pill-in 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) ${i * 0.06}s both`,
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-sidebar px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-white/20 hover:text-foreground disabled:opacity-50"
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }

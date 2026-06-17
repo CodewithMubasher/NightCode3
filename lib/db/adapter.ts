@@ -1,4 +1,5 @@
 import { getDb } from "./schema"
+import { queueWrite } from "./batch"
 import type {
   DBSession,
   DBAgentStep,
@@ -8,14 +9,17 @@ import type {
   DBCompaction,
 } from "./types"
 
+function q(sql: string, params: Record<string, unknown>): void {
+  queueWrite(sql, params)
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 export function createSession(session: DBSession): void {
-  const db = getDb()
-  db.prepare(`
+  q(`
     INSERT INTO sessions (id, chat_id, status, model, provider, created_at, updated_at, metadata)
     VALUES (@id, @chat_id, @status, @model, @provider, @created_at, @updated_at, @metadata)
-  `).run(session)
+  `, session as unknown as Record<string, unknown>)
 }
 
 export function getSession(id: string): DBSession | undefined {
@@ -23,7 +27,7 @@ export function getSession(id: string): DBSession | undefined {
 }
 
 export function updateSessionStatus(id: string, status: DBSession["status"]): void {
-  getDb().prepare("UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), id)
+  q("UPDATE sessions SET status = @status, updated_at = @updated_at WHERE id = @id", { status, updated_at: Date.now(), id })
 }
 
 export function listSessionsByChat(chatId: string): DBSession[] {
@@ -33,10 +37,10 @@ export function listSessionsByChat(chatId: string): DBSession[] {
 // ─── Agent Steps ──────────────────────────────────────────────────────────────
 
 export function createStep(step: DBAgentStep): void {
-  getDb().prepare(`
+  q(`
     INSERT INTO agent_steps (id, session_id, step_number, input_tokens, output_tokens, finish_reason, created_at)
     VALUES (@id, @session_id, @step_number, @input_tokens, @output_tokens, @finish_reason, @created_at)
-  `).run(step)
+  `, step as unknown as Record<string, unknown>)
 }
 
 export function getStepsBySession(sessionId: string): DBAgentStep[] {
@@ -50,14 +54,14 @@ export function getLatestStep(sessionId: string): DBAgentStep | undefined {
 // ─── Tool Calls ───────────────────────────────────────────────────────────────
 
 export function createToolCall(tc: DBToolCall): void {
-  getDb().prepare(`
+  q(`
     INSERT INTO tool_calls (id, step_id, session_id, tool_name, args, status, created_at)
     VALUES (@id, @step_id, @session_id, @tool_name, @args, @status, @created_at)
-  `).run(tc)
+  `, tc as unknown as Record<string, unknown>)
 }
 
 export function updateToolCallStatus(id: string, status: DBToolCall["status"]): void {
-  getDb().prepare("UPDATE tool_calls SET status = ? WHERE id = ?").run(status, id)
+  q("UPDATE tool_calls SET status = @status WHERE id = @id", { status, id })
 }
 
 export function getToolCallsByStep(stepId: string): DBToolCall[] {
@@ -71,10 +75,10 @@ export function getToolCallsBySession(sessionId: string): DBToolCall[] {
 // ─── Tool Results ─────────────────────────────────────────────────────────────
 
 export function createToolResult(tr: DBToolResult): void {
-  getDb().prepare(`
+  q(`
     INSERT INTO tool_results (id, tool_call_id, step_id, session_id, success, data, error, execution_time_ms, created_at)
     VALUES (@id, @tool_call_id, @step_id, @session_id, @success, @data, @error, @execution_time_ms, @created_at)
-  `).run(tr)
+  `, tr as unknown as Record<string, unknown>)
 }
 
 export function getToolResultByToolCall(toolCallId: string): DBToolResult | undefined {
@@ -88,10 +92,10 @@ export function getToolResultsBySession(sessionId: string): DBToolResult[] {
 // ─── Agent Events ─────────────────────────────────────────────────────────────
 
 export function createEvent(event: Omit<DBAgentEvent, "id">): void {
-  getDb().prepare(`
+  q(`
     INSERT INTO agent_events (session_id, event_type, payload, timestamp)
     VALUES (@session_id, @event_type, @payload, @timestamp)
-  `).run(event)
+  `, event as unknown as Record<string, unknown>)
 }
 
 export function getEventsBySession(sessionId: string): DBAgentEvent[] {
@@ -101,10 +105,10 @@ export function getEventsBySession(sessionId: string): DBAgentEvent[] {
 // ─── Compactions ──────────────────────────────────────────────────────────────
 
 export function createCompaction(compaction: DBCompaction): void {
-  getDb().prepare(`
+  q(`
     INSERT INTO compactions (id, session_id, step_range_start, step_range_end, summary, created_at)
     VALUES (@id, @session_id, @step_range_start, @step_range_end, @summary, @created_at)
-  `).run(compaction)
+  `, compaction as unknown as Record<string, unknown>)
 }
 
 export function getCompactionsBySession(sessionId: string): DBCompaction[] {
@@ -114,11 +118,15 @@ export function getCompactionsBySession(sessionId: string): DBCompaction[] {
 // ─── cleanup ──────────────────────────────────────────────────────────────────
 
 export function deleteSessionCascade(sessionId: string): void {
+  // Cascade deletes run immediately (not batched) since they're cleanup-only
   const db = getDb()
-  db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId)
-  db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(sessionId)
-  db.prepare("DELETE FROM tool_results WHERE session_id = ?").run(sessionId)
-  db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(sessionId)
-  db.prepare("DELETE FROM agent_steps WHERE session_id = ?").run(sessionId)
-  db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId)
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM agent_steps WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId)
+  })
+  tx()
 }

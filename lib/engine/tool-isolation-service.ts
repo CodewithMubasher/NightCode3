@@ -6,6 +6,77 @@ import {
 
 const MAX_SUMMARY_LENGTH = 2000
 
+function summarizeFileContent(path: string, content: string): Record<string, unknown> {
+  const lines = content.split("\n")
+  const totalLines = lines.length
+  const trimmed = content.trim()
+
+  // Detect file type by extension
+  const ext = path.split(".").pop()?.toLowerCase()
+
+  // Extract top-level imports/exports (heuristic for code files)
+  const imports: string[] = []
+  const exports: string[] = []
+  const functions: string[] = []
+  const classes: string[] = []
+  const interfaces: string[] = []
+  const types: string[] = []
+
+  const codeExtensions = new Set(["ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "kt", "swift", "c", "cpp", "h", "hpp"])
+  const isCode = codeExtensions.has(ext ?? "")
+
+  if (isCode) {
+    for (const line of lines) {
+      const t = line.trim()
+      if (t.startsWith("import ") || t.startsWith("require(") || t.startsWith("from ")) {
+        imports.push(t)
+      }
+      if (t.startsWith("export ") || t.startsWith("module.exports")) {
+        exports.push(t)
+      }
+      if (t.startsWith("function ") || t.startsWith("async function ")) {
+        const match = t.match(/(?:async\s+)?function\s+(\w+)/)
+        if (match) functions.push(match[1])
+      }
+      if (t.startsWith("class ")) {
+        const match = t.match(/class\s+(\w+)/)
+        if (match) classes.push(match[1])
+      }
+      if (t.startsWith("interface ")) {
+        const match = t.match(/interface\s+(\w+)/)
+        if (match) interfaces.push(match[1])
+      }
+      if (t.startsWith("type ") && t.includes("=")) {
+        const match = t.match(/type\s+(\w+)/)
+        if (match) types.push(match[1])
+      }
+    }
+  }
+
+  const maxPreviewLines = isCode ? 20 : 15
+  const head = lines.slice(0, maxPreviewLines).join("\n")
+  const tail = totalLines > maxPreviewLines ? lines.slice(-10).join("\n") : ""
+
+  return {
+    path,
+    size: content.length,
+    lines: totalLines,
+    type: isCode ? "code" : "text",
+    language: ext ?? "unknown",
+    imports: imports.length > 15 ? [...imports.slice(0, 15), `...and ${imports.length - 15} more`] : imports,
+    exports: exports.length > 10 ? [...exports.slice(0, 10), `...and ${exports.length - 10} more`] : exports,
+    functions: functions.slice(0, 20),
+    classes: classes.slice(0, 10),
+    interfaces: interfaces.slice(0, 10),
+    types: types.slice(0, 10),
+    preview_head: head,
+    preview_tail: totalLines > maxPreviewLines ? tail : undefined,
+    message: isCode
+      ? `Read ${path} (${totalLines} lines, ${content.length} chars). ${imports.length} imports, ${exports.length} exports, ${functions.length} functions, ${classes.length} classes. Use read_file again with a section reference if you need to see specific portions.`
+      : `Read ${path} (${totalLines} lines, ${content.length} chars).`,
+  }
+}
+
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
@@ -88,11 +159,9 @@ export class ToolIsolationService {
     switch (toolName) {
       case "read_file": {
         const content = record.content as string | undefined
-        if (typeof content === "string" && content.length > MAX_SUMMARY_LENGTH) {
-          return {
-            ...record,
-            content: content.slice(0, MAX_SUMMARY_LENGTH) + `\n\n...[truncated: ${content.length} total chars]`,
-          }
+        const filePath = record.path as string
+        if (typeof content === "string" && typeof filePath === "string") {
+          return summarizeFileContent(filePath, content)
         }
         return record
       }
@@ -151,6 +220,7 @@ export class ToolIsolationService {
         return record
       }
 
+      case "ask":
       case "think":
         return record
 

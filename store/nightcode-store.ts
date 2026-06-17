@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings } from "@/types"
+import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData } from "@/types"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -19,6 +19,7 @@ interface NightCodeState {
   chats: Chat[]
   activeChatId: string | null
   isStreaming: boolean
+  askData: AskData | null
   settings: AppSettings
 
   createChat: (model?: string, provider?: string) => string
@@ -30,12 +31,14 @@ interface NightCodeState {
   updateToolState: (chatId: string, messageId: string, toolState: ToolState) => void
   updateMessageStatus: (chatId: string, messageId: string, status: MessageStatus) => void
   setMessageError: (chatId: string, messageId: string, error: boolean) => void
-  addArtifact: (chatId: string, messageId: string, artifact: Artifact) => void
-  deleteArtifact: (chatId: string, artifactId: string) => void
+  upsertArtifact: (chatId: string, messageId: string, artifact: Artifact) => void
+  deleteArtifact: (artifactId: string) => void
   renameChat: (id: string, title: string) => void
 
   sendMessage: (chatId: string, content: string, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
   cancelStream: () => void
+  setAskData: (data: AskData | null) => void
+  submitAskAnswers: (chatId: string, answers: Record<string, unknown>) => Promise<void>
 
   setSettings: (settings: Partial<AppSettings>) => void
   clearAll: () => void
@@ -49,6 +52,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       chats: [],
       activeChatId: null,
       isStreaming: false,
+      askData: null,
       settings: {
         theme: "dark",
         primaryColor: "#FFFFFF",
@@ -158,14 +162,21 @@ export const useNightCodeStore = create<NightCodeState>()(
         }))
       },
 
-      addArtifact: (chatId, messageId, artifact) => {
+      upsertArtifact: (chatId, messageId, artifact) => {
         set((s) => ({
           chats: s.chats.map((c) =>
             c.id === chatId
               ? {
                   ...c,
                   messages: c.messages.map((m) =>
-                    m.id === messageId ? { ...m, artifacts: [...m.artifacts, artifact] } : m
+                    m.id === messageId
+                      ? {
+                          ...m,
+                          artifacts: m.artifacts.some((a) => a.id === artifact.id)
+                            ? m.artifacts.map((a) => (a.id === artifact.id ? artifact : a))
+                            : [...m.artifacts, artifact],
+                        }
+                      : m
                   ),
                 }
               : c
@@ -173,19 +184,15 @@ export const useNightCodeStore = create<NightCodeState>()(
         }))
       },
 
-      deleteArtifact: (chatId, artifactId) => {
+      deleteArtifact: (artifactId) => {
         set((s) => ({
-          chats: s.chats.map((c) =>
-            c.id === chatId
-              ? {
-                  ...c,
-                  messages: c.messages.map((m) => ({
-                    ...m,
-                    artifacts: m.artifacts.filter((a) => a.id !== artifactId),
-                  })),
-                }
-              : c
-          ),
+          chats: s.chats.map((c) => ({
+            ...c,
+            messages: c.messages.map((m) => ({
+              ...m,
+              artifacts: m.artifacts.filter((a) => a.id !== artifactId),
+            })),
+          })),
         }))
       },
 
@@ -202,10 +209,23 @@ export const useNightCodeStore = create<NightCodeState>()(
 
       sendMessage: async (chatId, content, skills, attachments, model, provider) => {
         const state = get()
+        if (state.isStreaming) return
         const chat = state.chats.find((c) => c.id === chatId)
         if (!chat) return
 
-        abortController?.abort()
+        const prevModel = chat.model
+        if (model && prevModel && model !== prevModel) {
+          chat.messages.push({
+            id: generateId(),
+            role: "system",
+            content: `[System: Model switched from ${prevModel} to ${model}. Continue the conversation using the new model's capabilities and reasoning style. The previous analysis and context remain valid.]`,
+            toolStates: {},
+            artifacts: [],
+            status: "complete",
+            hasError: false,
+          })
+        }
+
         abortController = new AbortController()
         const signal = abortController.signal
 
@@ -320,7 +340,8 @@ export const useNightCodeStore = create<NightCodeState>()(
                     break
                   }
                   case "tool_start": {
-                    const toolCallId = (parsed.payload?.toolCallId as string) ?? `tool_${parsed.payload?.callNumber ?? 0}`
+                    const toolCallId = parsed.payload?.toolCallId as string
+                    if (!toolCallId) break
                     const ts: ToolState = {
                       id: toolCallId,
                       tool: (parsed.payload?.tool as string) ?? "unknown",
@@ -332,31 +353,29 @@ export const useNightCodeStore = create<NightCodeState>()(
                     break
                   }
                   case "tool_end": {
-                    const toolCallId = (parsed.payload?.toolCallId as string) ?? ""
-                    if (toolCallId) {
-                      const status = (parsed.payload?.status as ToolStatus) ?? "verified"
-                      const existing = get().chats.find((c) => c.id === chatId)
-                        ?.messages.find((m) => m.id === assistantMessage.id)
-                        ?.toolStates[toolCallId]
-                      if (existing) {
-                        get().updateToolState(chatId, assistantMessage.id, {
-                          ...existing,
-                          status,
-                          result: parsed.payload?.result as Record<string, unknown> | undefined,
-                          error: parsed.payload?.error as string | undefined,
-                          discrepancy: parsed.payload?.discrepancy as string | undefined,
-                        })
-                      }
+                    const toolCallId = parsed.payload?.toolCallId as string
+                    if (!toolCallId) break
+                    const msg = get().chats.find((c) => c.id === chatId)
+                      ?.messages.find((m) => m.id === assistantMessage.id)
+                    const existing = msg?.toolStates[toolCallId]
+                    if (existing) {
+                      get().updateToolState(chatId, assistantMessage.id, {
+                        id: toolCallId,
+                        tool: existing.tool,
+                        args: existing.args,
+                        status: (parsed.payload?.status as ToolStatus) ?? "verified",
+                        result: parsed.payload?.result as Record<string, unknown> | undefined,
+                        error: parsed.payload?.error as string | undefined,
+                        discrepancy: parsed.payload?.discrepancy as string | undefined,
+                        timestamp: existing.timestamp,
+                      })
                     }
                     break
                   }
                   case "artifact": {
                     const artifact = parsed.payload?.artifact as Artifact
                     if (artifact?.id) {
-                      get().addArtifact(chatId, assistantMessage.id, artifact)
-                      if (typeof window !== "undefined") {
-                        window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
-                      }
+                      get().upsertArtifact(chatId, assistantMessage.id, artifact)
                     }
                     break
                   }
@@ -364,8 +383,36 @@ export const useNightCodeStore = create<NightCodeState>()(
                     get().setMessageError(chatId, assistantMessage.id, true)
                     break
                   }
+                  case "usage": {
+                    const p = parsed.payload as Record<string, unknown> | undefined
+                    if (p?.provider && p?.model) {
+                      const { logUsage } = await import("@/lib/usage-tracker")
+                      logUsage(
+                        p.provider as string,
+                        p.model as string,
+                        (p.inputTokens as number) ?? 0,
+                        (p.outputTokens as number) ?? 0,
+                        (p.reasoningTokens as number) ?? 0,
+                      )
+                    }
+                    break
+                  }
+                  case "ask": {
+                    const payload = parsed.payload as Record<string, unknown> | undefined
+                    if (payload?.questions) {
+                      get().setAskData({ questions: payload.questions as AskData["questions"] })
+                      get().updateMessageContent(chatId, assistantMessage.id, "Let me ask a few questions to tailor the response...")
+                      get().updateMessageStatus(chatId, assistantMessage.id, "complete")
+                    }
+                    break
+                  }
                   case "message_complete": {
                     get().updateMessageStatus(chatId, assistantMessage.id, "complete")
+                    const completedMsg = get().chats.find((c) => c.id === chatId)
+                      ?.messages.find((m) => m.id === assistantMessage.id)
+                    if (completedMsg?.artifacts && completedMsg.artifacts.length > 0 && typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
+                    }
                     break
                   }
                 }
@@ -390,13 +437,36 @@ export const useNightCodeStore = create<NightCodeState>()(
             get().updateMessageStatus(chatId, assistantMessage.id, "error")
           }
         } finally {
-          set({ isStreaming: false })
+          const s = get()
+          const ch = s.chats.find((c) => c.id === chatId)
+          if (ch && model && model !== ch.model) {
+            ch.model = model
+          }
+          if (ch && provider && provider !== ch.provider) {
+            ch.provider = provider
+          }
+          set({ chats: [...s.chats], isStreaming: false })
           abortController = null
         }
       },
 
       setSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
+      setAskData: (data) => set({ askData: data }),
+      submitAskAnswers: async (chatId, answers) => {
+        const state = get()
+        if (!state.askData) return
+        const lines: string[] = []
+        for (const q of state.askData.questions) {
+          const val = answers[q.id]
+          if (val === undefined || val === "" || (Array.isArray(val) && val.length === 0)) continue
+          const answerStr = Array.isArray(val) ? val.join(", ") : String(val)
+          lines.push(`Q: ${q.question}\nA: ${answerStr}`)
+        }
+        set({ askData: null })
+        if (lines.length === 0) return
+        await get().sendMessage(chatId, lines.join("\n\n"))
+      },
       clearAll: () => set({ chats: [], activeChatId: null }),
     }),
     {

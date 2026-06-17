@@ -7,8 +7,11 @@ import { ToolIsolationService } from "@/lib/engine/tool-isolation-service"
 import { CompactionService } from "@/lib/engine/compaction-service"
 import { initSchema } from "@/lib/db/schema"
 import { createSession } from "@/lib/db/adapter"
+import { enableBatching, disableBatching, flushBatch } from "@/lib/db/batch"
+import { disconnectAll } from "@/lib/mcp/manager"
 
 export async function POST(req: Request) {
+  enableBatching()
   try {
     const body = await req.json()
     const { messages, messageId, chatId, model, provider: rawProvider, skillInjected } = body
@@ -67,6 +70,18 @@ export async function POST(req: Request) {
         const unsubSSE = engine.subscribe((_event, data: any) => {
           if (abortController.signal.aborted) return
           console.log('SSE event:', data.type, data.payload ? JSON.stringify(data.payload).substring(0, 100) : '')
+          // Backpressure: if consumer is slow, drop non-critical events rather than OOM
+          const desiredSize = controller.desiredSize
+          if (desiredSize !== null && desiredSize < 0) {
+            if (data.type === "text_delta") {
+              // Always send text deltas even under backpressure (user experience)
+              try {
+                const line = `data: ${JSON.stringify(data)}\n\n`
+                controller.enqueue(encoder.encode(line))
+              } catch {}
+            }
+            return
+          }
           try {
             const line = `data: ${JSON.stringify(data)}\n\n`
             controller.enqueue(encoder.encode(line))
@@ -109,6 +124,9 @@ export async function POST(req: Request) {
         } finally {
           unsubSSE()
           unsubRecorder()
+          flushBatch()
+          disableBatching()
+          await disconnectAll()
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))
           controller.close()
         }
@@ -123,6 +141,9 @@ export async function POST(req: Request) {
       },
     })
   } catch (err) {
+    flushBatch()
+    disableBatching()
+    await disconnectAll()
     const msg = err instanceof Error ? err.message : "Invalid request"
     return new Response(
       `data: ${JSON.stringify({ type: "error", payload: { message: msg }, timestamp: Date.now() })}\n\ndata: [DONE]\n\n`,

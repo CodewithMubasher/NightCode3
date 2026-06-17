@@ -4,6 +4,7 @@ const GROQ_KEY = process.env.GROQ_API_KEY
 const GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY
+const OLLAMA_KEY = process.env.OLLAMA_CLOUD_API_KEY
 const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
@@ -54,6 +55,28 @@ async function fetchOpenCodeModels() {
         display_name: m.id === "big-pickle" ? "Big Pickle (OpenCode Free MoE)" : m.id,
         provider: "opencode" as const,
         provider_display_name: "OpenCode",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
+async function fetchOllamaModels() {
+  try {
+    const res = await fetch("https://ollama.com/api/tags", {
+      headers: { Authorization: `Bearer ${OLLAMA_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const raw = json.models || []
+    const models = raw
+      .filter((m: any) => m.name)
+      .map((m: any) => ({
+        id: m.name,
+        display_name: m.name,
+        provider: "ollama" as const,
+        provider_display_name: "Ollama Cloud",
       }))
     return models.length > 0 ? models : null
   } catch {
@@ -112,6 +135,16 @@ export async function GET() {
       groups.push({
         label: "OpenCode",
         models: ocModels,
+      })
+    }
+  }
+
+  if (OLLAMA_KEY) {
+    const olModels = await fetchOllamaModels()
+    if (olModels) {
+      groups.push({
+        label: "Ollama Cloud",
+        models: olModels,
       })
     }
   }

@@ -1,5 +1,7 @@
 import type { Message } from "@/types"
 import type { ToolImplementation } from "./tools"
+import { getCompactionsBySession } from "@/lib/db/adapter"
+import { listArtifacts } from "@/lib/engine/artifact-store"
 
 // No OUTPUT FORMAT section needed — the SDK negotiates tool calling format
 // natively with each provider (OpenAI function calling, Gemini, Groq, etc.)
@@ -14,8 +16,15 @@ Assess the user's request and decide how to respond:
 - Need multiple files → create them all before responding.
 - Structured document (plan, roadmap, PRD, spec, guide) → use create_artifact.
 - Complex problem → use think first to plan your approach.
+- Complex or ambiguous build requests → use ask tool first to gather requirements.
 
-DEPTH RULE: For investigative tasks (analyze, find bugs, review, audit, explore) — use think first to map out phases, then execute them fully. Only respond when you have read the actual source files and have real evidence. Listing files is not evidence. Reading and understanding file contents is evidence. Cite specific file paths and findings in your response.`
+ASK BEFORE BUILDING: For complex requests (building apps, creating projects, implementing features), use the ask tool to gather requirements first. Ask about tech stack, features, design preferences, and other relevant details. Do NOT build anything until the user has answered your questions. The ask tool organizes questions into tabs, each tab containing related questions.
+
+DEPTH RULE: For investigative tasks (analyze, find bugs, review, audit, explore) — use think first to map out phases, then execute them fully. Only respond when you have read the actual source files and have real evidence. Listing files is not evidence. Reading and understanding file contents is evidence. Cite specific file paths and findings in your response.
+
+PARALLEL TOOL RULE: You can call multiple independent tools in a single step. For example, if you need to read three files or list two directories, do it in one response. Group independent operations together for efficiency. Dependent operations (e.g., read a file after listing its directory) must still be sequential.
+
+ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.`
 
 export function buildSystemPrompt(mcpTools?: ToolImplementation[]): string {
   if (!mcpTools || mcpTools.length === 0) return AGENT_PROMPT
@@ -32,17 +41,73 @@ You also have access to these connected external tools:
 ${mcpSection}`
 }
 
-export function buildContext(
-  messages: Message[],
-  systemPrompt: string
-): Array<{ role: string; content: string }> {
-  const result: Array<{ role: string; content: string }> = [
-    { role: "system", content: systemPrompt },
-  ]
+function buildCompactionBlock(sessionId?: string): string | null {
+  if (!sessionId) return null
+  const compactions = getCompactionsBySession(sessionId)
+  if (compactions.length === 0) return null
 
-  for (const msg of messages) {
-    result.push({ role: msg.role, content: msg.content })
+  const summaries = compactions.map((c) => {
+    try {
+      const s = JSON.parse(c.summary)
+      return `Steps ${c.step_range_start}-${c.step_range_end}:
+- Goal: ${s.goal ?? "N/A"}
+- Progress: ${(s.progress ?? []).join(", ")}
+- Blockers: ${(s.blockers ?? []).join(", ") || "None"}
+- Files: ${(s.files ?? []).join(", ") || "N/A"}
+- Next: ${(s.next ?? []).join(", ") || "N/A"}`
+    } catch {
+      return null
+    }
+  }).filter(Boolean)
+
+  if (summaries.length === 0) return null
+
+  return `[Compacted History — earlier steps summarized for context]
+${summaries.join("\n\n")}`
+}
+
+function buildArtifactBlock(): string | null {
+  const all = listArtifacts()
+  if (all.length === 0) return null
+  const lines = all.map((a) => `- ${a.id}: "${a.title}" (${a.type}, ${a.content.length} chars)`)
+  return `[Stored Artifacts — use list_artifacts, read_artifact, and edit_artifact to interact with these]
+${lines.join("\n")}`
+}
+
+function buildSystemMessage(mcpTools?: ToolImplementation[]): string {
+  const basePrompt = buildSystemPrompt(mcpTools)
+  return basePrompt
+}
+
+/** Builds the full system prompt string and returns conversation messages separately. */
+export function buildRequest(
+  messages: Message[],
+  systemPrompt: string,
+  sessionId?: string
+): { system: string; messages: Array<{ role: string; content: string }> } {
+  let combinedSystem = systemPrompt
+
+  const compacted = buildCompactionBlock(sessionId)
+  if (compacted) {
+    combinedSystem += "\n\n" + compacted
   }
 
-  return result
+  const artifactBlock = buildArtifactBlock()
+  if (artifactBlock) {
+    combinedSystem += "\n\n" + artifactBlock
+  }
+
+  const msgs = messages.map((m) => ({ role: m.role, content: m.content }))
+
+  return { system: combinedSystem, messages: msgs }
+}
+
+// Kept for backward compatibility — delegates to buildRequest
+export function buildContext(
+  messages: Message[],
+  systemPrompt: string,
+  sessionId?: string
+): Array<{ role: string; content: string }> {
+  const { system, messages: msgs } = buildRequest(messages, systemPrompt, sessionId)
+  return [{ role: "system", content: system }, ...msgs]
 }
