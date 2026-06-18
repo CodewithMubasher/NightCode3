@@ -25,6 +25,7 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "read_artifact" },
     { name: "edit_artifact" },
     { name: "ask" },
+    { name: "search_memories" },
   ],
   maxIterations: 20,
   allowAutoFix: true,

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { MessageBubble } from "@/components/chat/message-bubble"
@@ -17,9 +17,38 @@ export default function ChatPage() {
   const isStreaming = useNightCodeStore((s) => s.isStreaming)
   const askData = useNightCodeStore((s) => s.askData)
   const submitAskAnswers = useNightCodeStore((s) => s.submitAskAnswers)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const userScrolled = useRef(false)
+
   useEffect(() => {
     if (!chat) router.replace("/")
   }, [chat, router])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    function onScroll() {
+      const threshold = 100
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      userScrolled.current = dist > threshold
+    }
+
+    el.addEventListener("scroll", onScroll, { passive: true })
+
+    const observer = new MutationObserver(() => {
+      if (!userScrolled.current) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+      }
+    })
+
+    observer.observe(el, { childList: true, subtree: true, characterData: true })
+
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      observer.disconnect()
+    }
+  }, [id])
 
   if (!chat) return null
 
@@ -37,7 +66,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto hide-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto hide-scrollbar">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
           {chat.messages.map((message) => (
             <div

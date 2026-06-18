@@ -55,7 +55,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       askData: null,
       settings: {
         theme: "dark",
-        primaryColor: "#FFFFFF",
+        primaryColor: "#D97757",
         defaultModel: "big-pickle",
         defaultProvider: "opencode",
         temperature: 0.7,
@@ -369,6 +369,19 @@ export const useNightCodeStore = create<NightCodeState>()(
                         discrepancy: parsed.payload?.discrepancy as string | undefined,
                         timestamp: existing.timestamp,
                       })
+                    } else {
+                      // tool_end arrived before tool_start (edge case: out-of-order events).
+                      // Create the entry with the end state so it's not lost.
+                      get().updateToolState(chatId, assistantMessage.id, {
+                        id: toolCallId,
+                        tool: (parsed.payload?.tool as string) ?? "unknown",
+                        args: (parsed.payload?.args as Record<string, unknown>) ?? {},
+                        status: (parsed.payload?.status as ToolStatus) ?? "verified",
+                        result: parsed.payload?.result as Record<string, unknown> | undefined,
+                        error: parsed.payload?.error as string | undefined,
+                        discrepancy: parsed.payload?.discrepancy as string | undefined,
+                        timestamp: parsed.timestamp ?? Date.now(),
+                      })
                     }
                     break
                   }
@@ -410,7 +423,17 @@ export const useNightCodeStore = create<NightCodeState>()(
                     get().updateMessageStatus(chatId, assistantMessage.id, "complete")
                     const completedMsg = get().chats.find((c) => c.id === chatId)
                       ?.messages.find((m) => m.id === assistantMessage.id)
-                    if (completedMsg?.artifacts && completedMsg.artifacts.length > 0 && typeof window !== "undefined") {
+                    // Only auto-open artifact panel when ALL tool execution is done.
+                    // Don't open during streaming or if tools are still running.
+                    const hasRunningTools = completedMsg?.toolStates
+                      ? Object.values(completedMsg.toolStates).some((t) => t.status === "running")
+                      : false
+                    if (
+                      completedMsg?.artifacts &&
+                      completedMsg.artifacts.length > 0 &&
+                      !hasRunningTools &&
+                      typeof window !== "undefined"
+                    ) {
                       window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
                     }
                     break
@@ -482,8 +505,15 @@ export const useNightCodeStore = create<NightCodeState>()(
         for (const chat of state.chats) {
           for (const msg of chat.messages) {
             if (msg.status === "streaming") {
-              const hasRunning = Object.values(msg.toolStates).some((t) => t.status === "running")
+              const toolStates = msg.toolStates
+              const hasRunning = Object.values(toolStates).some((t) => t.status === "running")
               if (hasRunning) {
+                // Mark all "running" tools as "skipped" — they never completed
+                for (const [id, ts] of Object.entries(toolStates)) {
+                  if (ts.status === "running") {
+                    toolStates[id] = { ...ts, status: "skipped" }
+                  }
+                }
                 msg.status = "interrupted"
               } else if (msg.hasError) {
                 msg.status = "error"

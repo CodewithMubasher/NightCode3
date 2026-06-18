@@ -11,6 +11,7 @@ export function SettingsApplier() {
 
   useEffect(() => {
     document.documentElement.style.setProperty("--primary-color", settings.primaryColor)
+    document.documentElement.style.setProperty("--primary", settings.primaryColor)
   }, [settings.primaryColor])
 
   useEffect(() => {

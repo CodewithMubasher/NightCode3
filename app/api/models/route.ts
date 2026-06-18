@@ -5,6 +5,7 @@ const GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY
 const OLLAMA_KEY = process.env.OLLAMA_CLOUD_API_KEY
+const XIAOMI_KEY = process.env.XIAOMI_API_KEY
 const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
@@ -84,6 +85,27 @@ async function fetchOllamaModels() {
   }
 }
 
+async function fetchXiaomiModels() {
+  try {
+    const res = await fetch("https://api.xiaomimimo.com/v1/models", {
+      headers: { Authorization: `Bearer ${XIAOMI_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.name || m.id,
+        provider: "xiaomi" as const,
+        provider_display_name: "Xiaomi",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchPuterModels() {
   try {
     const { default: puter } = await import("@heyputer/puter.js")
@@ -145,6 +167,16 @@ export async function GET() {
       groups.push({
         label: "Ollama Cloud",
         models: olModels,
+      })
+    }
+  }
+
+  if (XIAOMI_KEY) {
+    const xmModels = await fetchXiaomiModels()
+    if (xmModels) {
+      groups.push({
+        label: "Xiaomi",
+        models: xmModels,
       })
     }
   }

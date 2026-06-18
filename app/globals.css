@@ -1,7 +1,26 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-
+@plugin "@tailwindcss/typography";
 @custom-variant dark (&:is(.dark *));
+
+.prose {
+  --tw-prose-body: oklch(0.95 0 0);
+  --tw-prose-headings: oklch(1 0 0);
+  --tw-prose-links: oklch(0.75 0.1 250);
+  --tw-prose-bold: oklch(1 0 0);
+  --tw-prose-code: oklch(1 0 0);
+  --tw-prose-quotes: oklch(0.9 0 0);
+}
+
+.prose-sm {
+  p { margin-bottom: 0.25em; margin-top: 0; }
+  :where(p):not(:where([class~="not-prose"] *)) { margin-bottom: 0.25em; margin-top: 0; }
+  :where(ul, ol):not(:where([class~="not-prose"] *)) { margin-top: 0.15em; margin-bottom: 0.25em; }
+  :where(h1, h2, h3, h4):not(:where([class~="not-prose"] *)) { margin-top: 0.6em; margin-bottom: 0.15em; }
+  :where(blockquote):not(:where([class~="not-prose"] *)) { margin-top: 0.3em; margin-bottom: 0.3em; }
+  :where(pre):not(:where([class~="not-prose"] *)) { margin-top: 0.3em; margin-bottom: 0.3em; }
+  :where(li):not(:where([class~="not-prose"] *)) { margin-top: 0; margin-bottom: 0; }
+}
 
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
@@ -49,7 +68,7 @@
 
 :root {
   --radius: 0.625rem;
-  --primary-color: #ffffff;
+  --primary-color: var(--primary);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -204,3 +223,4 @@
 @keyframes cinematic-icon-pop {
   to { opacity: 1; transform: scale(1); }
 }
+

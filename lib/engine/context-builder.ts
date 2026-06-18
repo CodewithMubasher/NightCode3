@@ -24,7 +24,8 @@ DEPTH RULE: For investigative tasks (analyze, find bugs, review, audit, explore)
 
 PARALLEL TOOL RULE: You can call multiple independent tools in a single step. For example, if you need to read three files or list two directories, do it in one response. Group independent operations together for efficiency. Dependent operations (e.g., read a file after listing its directory) must still be sequential.
 
-ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.`
+ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.
+SEARCH MEMORIES: Use search_memories to find relevant facts, decisions, and project context from past conversations stored in artifacts. Search before creating new artifacts to avoid duplicates.`
 
 export function buildSystemPrompt(mcpTools?: ToolImplementation[]): string {
   if (!mcpTools || mcpTools.length === 0) return AGENT_PROMPT

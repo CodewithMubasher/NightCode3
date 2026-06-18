@@ -9,6 +9,7 @@ import { thinkTool } from "./think"
 import { createArtifactTool } from "./create-artifact"
 import { askTool } from "./ask"
 import { listArtifactsTool, readArtifactTool, editArtifactTool } from "./artifact-tools"
+import { searchMemoriesTool } from "./search-memories"
 
 export interface ToolImplementation {
   name: string
@@ -45,4 +46,5 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   list_artifacts: listArtifactsTool,
   read_artifact: readArtifactTool,
   edit_artifact: editArtifactTool,
+  search_memories: searchMemoriesTool,
 }

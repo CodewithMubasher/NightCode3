@@ -1,4 +1,5 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
+import { Copy } from "lucide-react"
 
 export function renderInlineMarkdown(content: string): ReactNode {
   const lines = content.split("\n")
@@ -13,9 +14,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
     if (line.startsWith("```")) {
       if (inCodeBlock) {
         elements.push(
-          <pre key={`code-${i}`} className="mb-3 mt-2 overflow-x-auto rounded-lg border border-border/50 bg-muted/50 p-3 text-xs font-mono last:mb-0">
-            <code>{codeBlockContent}</code>
-          </pre>
+          <CodeBlock key={`code-${i}`} content={codeBlockContent} />
         )
         codeBlockContent = ""
         inCodeBlock = false
@@ -202,4 +201,32 @@ function renderInline(fullContent: string, line: string): ReactNode {
   }
 
   return parts
+}
+
+function CodeBlock({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="group relative mb-2 mt-1.5">
+      <button
+        onClick={handleCopy}
+        className="absolute right-2 top-2 opacity-60 transition-opacity hover:opacity-80"
+      >
+        {copied ? (
+          <span className="text-[11px] text-muted-foreground">Copied</span>
+        ) : (
+          <Copy size={14} />
+        )}
+      </button>
+      <pre className="overflow-x-auto rounded-lg border border-border/50 bg-muted/50 p-3 text-sm font-mono">
+        <code>{content}</code>
+      </pre>
+    </div>
+  )
 }

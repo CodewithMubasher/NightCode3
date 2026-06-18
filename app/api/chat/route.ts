@@ -67,14 +67,23 @@ export async function POST(req: Request) {
 
     const stream = new ReadableStream({
       async start(controller) {
+        const criticalEvents = new Set(["tool_start", "tool_end", "artifact", "thinking", "error", "message_complete", "usage", "ask"])
         const unsubSSE = engine.subscribe((_event, data: any) => {
           if (abortController.signal.aborted) return
           console.log('SSE event:', data.type, data.payload ? JSON.stringify(data.payload).substring(0, 100) : '')
-          // Backpressure: if consumer is slow, drop non-critical events rather than OOM
+          // Backpressure: if consumer is slow, drop non-critical text_delta events
+          // to avoid OOM. Critical events (tool_start, tool_end, artifact, etc.)
+          // are always sent — they're small and essential for UI correctness.
           const desiredSize = controller.desiredSize
           if (desiredSize !== null && desiredSize < 0) {
             if (data.type === "text_delta") {
               // Always send text deltas even under backpressure (user experience)
+              try {
+                const line = `data: ${JSON.stringify(data)}\n\n`
+                controller.enqueue(encoder.encode(line))
+              } catch {}
+            }
+            if (criticalEvents.has(data.type)) {
               try {
                 const line = `data: ${JSON.stringify(data)}\n\n`
                 controller.enqueue(encoder.encode(line))

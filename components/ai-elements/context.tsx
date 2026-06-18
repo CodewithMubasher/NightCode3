@@ -169,7 +169,7 @@ export const ContextContentHeader = ({
             </p>
           </div>
           <div className="space-y-2">
-            <Progress className="bg-muted [&_[data-slot=progress-indicator]]:bg-[#008080]" value={usedPercent * PERCENT_MAX} />
+            <Progress className="bg-muted [&_[data-slot=progress-indicator]]:bg-[var(--primary-color)]" value={usedPercent * PERCENT_MAX} />
           </div>
         </>
       )}

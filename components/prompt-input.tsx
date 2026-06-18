@@ -13,7 +13,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
-import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Brain } from "lucide-react"
+import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Brain, Mic } from "lucide-react"
 import {
   Attachments,
   Attachment,
@@ -189,8 +189,8 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
         </div>
       )}
       <div
-        className="relative flex flex-col rounded-xl border bg-sidebar p-4 pb-3 pt-2 shadow-sm"
-        style={{ borderLeft: "2px solid #008080" }}
+        className="relative flex flex-col rounded-xl border bg-sidebar/95 px-4 py-3 shadow-lg"
+        style={{ borderLeft: "2px solid var(--primary-color)" }}
       >
         <div className="relative">
           <textarea
@@ -213,7 +213,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
             }}
             onKeyDown={handleKeyDown}
             disabled={disabled}
-            className="field-sizing-content max-h-48 min-h-[60px] w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 hide-scrollbar"
+            className="field-sizing-content max-h-48 min-h-[60px] w-full resize-none bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50 hide-scrollbar"
             placeholder="How can I help you today? (type @ to add a skill)"
             rows={1}
           />
@@ -225,7 +225,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                   onMouseDown={(e) => { e.preventDefault(); selectSkill(s) }}
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${i === skillCursor ? "bg-white/10" : ""}`}
                 >
-                  <Scroll size={14} style={{ color: "#008080" }} />
+                  <Scroll size={14} style={{ color: "var(--primary-color)" }} />
                   <span className="text-foreground">{s.slug}</span>
                   <span className="ml-auto text-xs text-muted-foreground">@{s.slug}</span>
                 </button>
@@ -281,7 +281,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
               <PopoverTrigger asChild>
                 <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
@@ -343,10 +343,16 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
               </PopoverContent>
             </Popover>
 
+            <button
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Mic size={14} />
+            </button>
             {value.trim() && (
               <button
                 onClick={disabled ? () => useNightCodeStore.getState().cancelStream() : handleSubmit}
-                className="flex size-7 items-center justify-center rounded-full bg-[#008080] text-white transition-all hover:bg-[#008080]/90 disabled:opacity-50"
+                className="flex size-7 items-center justify-center rounded-full text-white transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: "var(--primary-color)" }}
               >
                 {disabled ? <StopCircle size={14} /> : <ArrowUp size={14} />}
               </button>

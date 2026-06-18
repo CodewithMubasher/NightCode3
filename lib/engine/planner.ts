@@ -25,6 +25,11 @@ const opencode = createOpenAI({
   apiKey: process.env.OPENCODE_API_KEY || "",
 })
 
+const xiaomi = createOpenAI({
+  baseURL: "https://api.xiaomimimo.com/v1",
+  apiKey: process.env.XIAOMI_API_KEY || "",
+})
+
 export function getLanguageModel(provider: AIProvider, modelId: string) {
   switch (provider) {
     case "openai":
@@ -40,6 +45,8 @@ export function getLanguageModel(provider: AIProvider, modelId: string) {
     }
     case "opencode":
       return opencode.chat(modelId)
+    case "xiaomi":
+      return xiaomi.chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }

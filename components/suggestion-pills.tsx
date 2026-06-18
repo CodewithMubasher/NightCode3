@@ -31,7 +31,7 @@ export function SuggestionPills({ onSelect, disabled }: SuggestionPillsProps) {
             style={{
               animation: `pill-in 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) ${i * 0.06}s both`,
             }}
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-sidebar px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-white/20 hover:text-foreground disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-sidebar/80 px-3.5 py-1.5 text-sm text-foreground/80 transition-colors hover:border-white/40 hover:bg-sidebar hover:text-foreground disabled:opacity-50"
           >
             <Icon size={14} />
             {label}

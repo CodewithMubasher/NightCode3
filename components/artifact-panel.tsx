@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useCallback, useRef, useState } from "react"
+import { useEffect, useCallback, useRef, useState, useMemo } from "react"
 import { X, FileText, ChevronLeft, Download, Copy, Trash2 } from "lucide-react"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { Button } from "@/components/ui/button"
@@ -34,8 +34,47 @@ export function ArtifactPanel() {
     ? `${(totalSize / (1024 * 1024)).toFixed(1)} MB`
     : `${(totalSize / 1024).toFixed(1)} KB`
 
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState("")
+  const editRef = useRef<HTMLTextAreaElement>(null)
+  const proseRef = useRef<HTMLDivElement>(null)
+
   const activeArtifact = artifacts.find((a) => a.id === activeArtifactId)
   const showReader = isOpen && activeArtifactId !== null
+
+  const artifactLocation = useMemo(() => {
+    if (!activeArtifactId) return null
+    for (const chat of chats) {
+      for (const msg of chat.messages) {
+        if (msg.artifacts.some((a) => a.id === activeArtifactId)) {
+          return { chatId: chat.id, messageId: msg.id }
+        }
+      }
+    }
+    return null
+  }, [activeArtifactId, chats])
+
+  function handleDoubleClick() {
+    if (!activeArtifact) return
+    setEditContent(activeArtifact.content)
+    setEditing(true)
+    setTimeout(() => editRef.current?.focus(), 50)
+  }
+
+  function handleSave() {
+    if (!activeArtifact || !artifactLocation) return
+    useNightCodeStore.getState().upsertArtifact(
+      artifactLocation.chatId,
+      artifactLocation.messageId,
+      { ...activeArtifact, content: editContent }
+    )
+    setEditing(false)
+  }
+
+  function handleEditKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") { setEditing(false) }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); handleSave() }
+  }
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -163,10 +202,26 @@ export function ArtifactPanel() {
 
         {showReader && activeArtifact ? (
           <div className="flex-1 overflow-auto hide-scrollbar">
-            <div className="px-6 py-5">
-              <div className="[&_h1]:text-lg [&_h1]:font-bold [&_h1]:mb-3 [&_h1]:mt-5 [&_h1:first-child]:mt-0 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:pb-1 [&_h2]:border-b [&_h2]:border-sidebar-border [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mb-1.5 [&_h3]:mt-3 [&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-2.5 [&_code]:rounded [&_code]:bg-sidebar-accent [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_code]:font-mono [&_pre]:mb-3 [&_pre]:mt-1.5 [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-sidebar-border [&_pre]:bg-[#0a0a0a] [&_pre]:p-3 [&_pre]:text-[11px] [&_pre]:font-mono [&_pre]:leading-relaxed [&_pre]:overflow-x-auto [&_ul]:mb-2.5 [&_ul]:mt-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-0.5 [&_ol]:mb-2.5 [&_ol]:mt-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-0.5 [&_blockquote]:mb-2.5 [&_blockquote]:mt-1 [&_blockquote]:border-l-2 [&_blockquote]:border-sidebar-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-sidebar-foreground/60 [&_blockquote]:text-sm [&_table]:w-full [&_table]:mb-3 [&_table]:border-collapse [&_th]:border [&_th]:border-sidebar-border [&_th]:px-2.5 [&_th]:py-1 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:bg-sidebar-accent [&_td]:border [&_td]:border-sidebar-border [&_td]:px-2.5 [&_td]:py-1 [&_td]:text-xs [&_hr]:my-5 [&_hr]:border-sidebar-border [&_a]:text-[#0099ff] [&_a]:hover:underline">
-                {renderInlineMarkdown(activeArtifact.content)}
-              </div>
+            <div className="px-6 py-5" onDoubleClick={handleDoubleClick}>
+              {editing ? (
+                <textarea
+                  ref={editRef}
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  onBlur={handleSave}
+                  onKeyDown={handleEditKeyDown}
+                  className="w-full min-h-[300px] resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-relaxed text-[oklch(0.95_0_0)] outline-none font-sans hide-scrollbar"
+                  style={{ fieldSizing: "content" }}
+                />
+              ) : (
+                <div
+                  ref={proseRef}
+                  onDoubleClick={handleDoubleClick}
+                  className="prose prose-invert prose-sm max-w-none min-w-0 cursor-default select-text"
+                >
+                  {renderInlineMarkdown(activeArtifact.content)}
+                </div>
+              )}
             </div>
           </div>
         ) : (

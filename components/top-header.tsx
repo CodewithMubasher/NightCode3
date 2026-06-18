@@ -16,7 +16,7 @@ import { getUsageSummary, type ProviderModelStats } from "@/lib/usage-tracker"
 
 function LimitBar({ current, limit, label }: { current: number; limit: number | null; label: string }) {
   const pct = limit && limit > 0 ? Math.min(current / limit, 1) : 0
-  const color = pct >= 0.9 ? "bg-red-500" : pct >= 0.7 ? "bg-yellow-500" : "bg-[#008080]"
+  const color = pct >= 0.9 ? "bg-red-500" : pct >= 0.7 ? "bg-yellow-500" : "bg-[var(--primary-color)]"
   return (
     <div className="grid grid-cols-[auto_1fr_auto] items-center gap-1.5">
       <span className="text-muted-foreground">{label}</span>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useLayoutEffect } from "react"
 import type { Message, ToolState } from "@/types"
 import {
   Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
@@ -80,7 +80,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     edit_artifact: (a) => a ?? "Edited artifact",
     list_directory: (a) => a ? `Listed ${a}` : "Listed directory",
     search_files: () => "Searched files",
-    execute_command: (a) => a ? `Ran: ${a}` : "Ran command",
+    execute_command: () => "Run command",
     think: () => "Thinking",
     skill: () => "Read skill",
   }
@@ -206,11 +206,21 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     if (isStreamingTool) setExpanded(true)
   }, [isStreamingTool])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (timelineRef.current) {
       setContentHeight(timelineRef.current.scrollHeight)
     }
   }, [message.toolStates])
+
+  useLayoutEffect(() => {
+    const el = timelineRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      setContentHeight(el.scrollHeight)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   if (message.role === "user") {
     return (
@@ -272,7 +282,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
 
           {message.content && (
-            <div className="mt-1 text-base leading-relaxed" style={{ color: "#FFFFFF" }}>
+            <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}
             </div>
           )}
