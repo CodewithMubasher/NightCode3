@@ -53,7 +53,7 @@ export interface Chat {
   updatedAt: number
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga"
 
 export type View = "chat" | "settings" | "projects"
 

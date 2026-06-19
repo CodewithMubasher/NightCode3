@@ -35,6 +35,7 @@ export interface VerificationResult {
 export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   read_file: readFileTool,
   write_file: writeFileTool,
+  create_file: writeFileTool,
   list_directory: listDirectoryTool,
   delete_file: deleteFileTool,
   create_folder: createFolderTool,

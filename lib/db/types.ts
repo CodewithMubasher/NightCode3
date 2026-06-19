@@ -57,3 +57,14 @@ export interface DBCompaction {
   summary: string
   created_at: number
 }
+
+export interface DBFileSnapshot {
+  id: string
+  session_id: string
+  tool_call_id: string
+  tool_name: string
+  file_path: string
+  original_content: string | null
+  existed_before: number
+  created_at: number
+}

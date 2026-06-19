@@ -29,6 +29,7 @@ export default function ChatPage() {
     if (!el) return
 
     function onScroll() {
+      if (!el) return
       const threshold = 100
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight
       userScrolled.current = dist > threshold

@@ -6,6 +6,9 @@ const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY
 const OLLAMA_KEY = process.env.OLLAMA_CLOUD_API_KEY
 const XIAOMI_KEY = process.env.XIAOMI_API_KEY
+const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
+const ROUTEWAY_KEY = process.env.ROUTEWAY_API_KEY
+const NAGA_KEY = process.env.NAGA_API_KEY
 const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
@@ -78,6 +81,69 @@ async function fetchOllamaModels() {
         display_name: m.name,
         provider: "ollama" as const,
         provider_display_name: "Ollama Cloud",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
+async function fetchCerebrasModels() {
+  try {
+    const res = await fetch("https://api.cerebras.ai/v1/models", {
+      headers: { Authorization: `Bearer ${CEREBRAS_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "cerebras" as const,
+        provider_display_name: "Cerebras",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
+async function fetchRoutewayModels() {
+  try {
+    const res = await fetch("https://api.routeway.ai/v1/models", {
+      headers: { Authorization: `Bearer ${ROUTEWAY_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "routeway" as const,
+        provider_display_name: "Routeway",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
+async function fetchNagaModels() {
+  try {
+    const res = await fetch("https://api.naga.ac/v1/models", {
+      headers: { Authorization: `Bearer ${NAGA_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "naga" as const,
+        provider_display_name: "Naga",
       }))
     return models.length > 0 ? models : null
   } catch {
@@ -177,6 +243,36 @@ export async function GET() {
       groups.push({
         label: "Xiaomi",
         models: xmModels,
+      })
+    }
+  }
+
+  if (CEREBRAS_KEY) {
+    const cbModels = await fetchCerebrasModels()
+    if (cbModels) {
+      groups.push({
+        label: "Cerebras",
+        models: cbModels,
+      })
+    }
+  }
+
+  if (ROUTEWAY_KEY) {
+    const rwModels = await fetchRoutewayModels()
+    if (rwModels) {
+      groups.push({
+        label: "Routeway",
+        models: rwModels,
+      })
+    }
+  }
+
+  if (NAGA_KEY) {
+    const nagaModels = await fetchNagaModels()
+    if (nagaModels) {
+      groups.push({
+        label: "Naga",
+        models: nagaModels,
       })
     }
   }

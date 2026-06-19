@@ -35,6 +35,8 @@ interface NightCodeState {
   deleteArtifact: (artifactId: string) => void
   renameChat: (id: string, title: string) => void
 
+  rollbackToMessage: (chatId: string, messageId: string) => void
+
   sendMessage: (chatId: string, content: string, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
   cancelStream: () => void
   setAskData: (data: AskData | null) => void
@@ -88,6 +90,22 @@ export const useNightCodeStore = create<NightCodeState>()(
       },
 
       setActiveChat: (id) => set({ activeChatId: id }),
+
+      rollbackToMessage: (chatId, messageId) => {
+        set((s) => {
+          const chat = s.chats.find((c) => c.id === chatId)
+          if (!chat) return s
+          const idx = chat.messages.findIndex((m) => m.id === messageId)
+          if (idx === -1) return s
+          return {
+            chats: s.chats.map((c) =>
+              c.id === chatId
+                ? { ...c, messages: c.messages.slice(0, idx + 1), updatedAt: Date.now() }
+                : c
+            ),
+          }
+        })
+      },
 
       addMessage: (chatId, message) => {
         set((s) => ({

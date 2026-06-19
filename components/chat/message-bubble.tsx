@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useRef, useLayoutEffect } from "react"
+import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react"
 import type { Message, ToolState } from "@/types"
 import {
-  Copy, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse,
+  Copy, Check, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse, RotateCcw,
   CheckCircle2, ChevronDown, Circle,
   FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable,
 } from "lucide-react"
@@ -13,6 +13,7 @@ import {
   AttachmentPreview,
 } from "@/components/ai-elements/attachments"
 import { renderInlineMarkdown } from "@/lib/render-markdown"
+import { useNightCodeStore } from "@/store/nightcode-store"
 
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)/)
@@ -197,6 +198,36 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const toolCount = Object.keys(message.toolStates).length
+  const [copied, setCopied] = useState(false)
+  const [rollingBack, setRollingBack] = useState(false)
+  const [spinKey, setSpinKey] = useState(0)
+  const rollbackStore = useNightCodeStore((s) => s.rollbackToMessage)
+  const activeChatId = useNightCodeStore((s) => s.activeChatId)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(message.content).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }, [message.content])
+
+  const handleRollback = async () => {
+    setSpinKey((k) => k + 1)
+    setRollingBack(true)
+    try {
+      await fetch("/api/chat/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: message.id }),
+      })
+      if (activeChatId) {
+        rollbackStore(activeChatId, message.id)
+      }
+    } catch {
+      // silent fail — button re-enables on next render
+    } finally {
+      setRollingBack(false)
+    }
+  }
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const [expanded, setExpanded] = useState(isStreamingTool)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -247,6 +278,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   return (
     <div>
+      <style>{`
+        @keyframes spin-once {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
       <div className="flex items-start gap-3">
         <div className="flex shrink-0 items-center justify-center pt-1.5">
           <Eclipse size={24} style={{ color: "var(--primary-color)" }} className={message.status === "streaming" ? "animate-spin" : ""} />
@@ -294,14 +331,31 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           )}
           {message.status !== "streaming" && message.content && (
             <div className="mt-2 flex items-center gap-0.5">
-              <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                <Copy size={14} />
+              <button
+                onClick={handleCopy}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title="Copy message"
+              >
+                {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
               </button>
               <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <ThumbsUp size={14} />
               </button>
               <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <ThumbsDown size={14} />
+              </button>
+              <button
+                onClick={handleRollback}
+                disabled={rollingBack}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                title="Rollback to this point"
+              >
+                <RotateCcw
+                  size={14}
+                  key={spinKey}
+                  className={rollingBack ? "animate-spin" : ""}
+                  style={!rollingBack && spinKey > 0 ? { animation: "spin-once 0.4s ease-out", animationFillMode: "forwards" } : undefined}
+                />
               </button>
               <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <MoreHorizontal size={14} />

@@ -82,12 +82,24 @@ export function initSchema(): void {
       created_at      INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS file_snapshots (
+      id              TEXT PRIMARY KEY,
+      session_id      TEXT NOT NULL REFERENCES sessions(id),
+      tool_call_id    TEXT NOT NULL,
+      tool_name       TEXT NOT NULL,
+      file_path       TEXT NOT NULL,
+      original_content TEXT,
+      existed_before  INTEGER NOT NULL DEFAULT 1,
+      created_at      INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_steps_session ON agent_steps(session_id);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_step ON tool_calls(step_id);
     CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
     CREATE INDEX IF NOT EXISTS idx_tool_results_tool_call ON tool_results(tool_call_id);
     CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_compactions_session ON compactions(session_id);
+    CREATE INDEX IF NOT EXISTS idx_file_snapshots_session ON file_snapshots(session_id);
   `)
 }
 

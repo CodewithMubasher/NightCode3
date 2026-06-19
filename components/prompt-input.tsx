@@ -323,14 +323,14 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                           <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
                             {group.label}
                           </div>
-                          {group.models.map((model) => (
+                          {group.models.map((model, mi) => (
                             <button
-                              key={model.id}
+                              key={`${group.label}-${model.id}-${mi}`}
                               onClick={() => { setSelectedEntry(model); setPopoverOpen(false); setModelSearch("") }}
                               className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
                             >
                               <span className="truncate">{model.display_name}</span>
-                              {selectedEntry!.id === model.id && (
+                              {selectedEntry!.id === model.id && selectedEntry!.provider === model.provider && (
                                 <Check size={14} className="shrink-0 text-primary" />
                               )}
                             </button>

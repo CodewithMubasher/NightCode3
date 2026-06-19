@@ -1,4 +1,6 @@
 import type { Message, AIProvider } from "@/types"
+import * as fs from "fs"
+import * as path from "path"
 import { EventEmitter } from "./event-emitter"
 import { AGENT_CONFIG, type ModeConfig } from "./modes"
 import { buildSystemPrompt, buildContext, buildRequest } from "./context-builder"
@@ -9,11 +11,14 @@ import { verifyToolResult } from "./verifier"
 import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
 import { CompactionService } from "./compaction-service"
-import { createStep } from "@/lib/db/adapter"
+import { createStep, createFileSnapshot } from "@/lib/db/adapter"
+import type { DBFileSnapshot } from "@/lib/db/types"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
+
+const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
 
 export class NightCodeEngine {
   private emitter = new EventEmitter()
@@ -28,6 +33,42 @@ export class NightCodeEngine {
       payload,
       timestamp: Date.now(),
     })
+  }
+
+  private async takeFileSnapshot(toolName: string, args: Record<string, unknown>, toolCallId: string, sessionId: string): Promise<void> {
+    const rawPath = args.path as string | undefined
+    if (!rawPath) return
+
+    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKSPACE, rawPath)
+    let originalContent: string | null = null
+    let existedBefore = 1
+
+    try {
+      if (toolName === "write_file" || toolName === "delete_file") {
+        if (fs.existsSync(resolved)) {
+          originalContent = fs.readFileSync(resolved, "utf-8")
+        } else {
+          existedBefore = 0
+        }
+      } else if (toolName === "create_folder") {
+        existedBefore = fs.existsSync(resolved) ? 1 : 0
+      }
+    } catch {
+      existedBefore = 0
+    }
+
+    const snapshot: DBFileSnapshot = {
+      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      session_id: sessionId,
+      tool_call_id: toolCallId,
+      tool_name: toolName,
+      file_path: rawPath,
+      original_content: originalContent,
+      existed_before: existedBefore,
+      created_at: Date.now(),
+    }
+
+    createFileSnapshot(snapshot)
   }
 
   async run(
@@ -205,6 +246,9 @@ export class NightCodeEngine {
               return { tc, skipResult: false, success: true, data: forcedThink.data, forcedThink: true } as const
             }
 
+            if (["write_file", "delete_file", "create_folder"].includes(tc.toolName)) {
+              await this.takeFileSnapshot(tc.toolName, tc.args, tc.generatedId, messageId)
+            }
             const execResult = await executeTool(tc.toolDef!, tc.args)
             return { tc, ...execResult, skipResult: false, forcedThink: false } as const
           })

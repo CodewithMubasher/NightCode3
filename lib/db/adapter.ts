@@ -7,6 +7,7 @@ import type {
   DBToolResult,
   DBAgentEvent,
   DBCompaction,
+  DBFileSnapshot,
 } from "./types"
 
 function q(sql: string, params: Record<string, unknown>): void {
@@ -115,12 +116,26 @@ export function getCompactionsBySession(sessionId: string): DBCompaction[] {
   return getDb().prepare("SELECT * FROM compactions WHERE session_id = ? ORDER BY step_range_start ASC").all(sessionId) as DBCompaction[]
 }
 
+// ─── File Snapshots ───────────────────────────────────────────────────────────
+
+export function createFileSnapshot(snapshot: DBFileSnapshot): void {
+  q(`
+    INSERT INTO file_snapshots (id, session_id, tool_call_id, tool_name, file_path, original_content, existed_before, created_at)
+    VALUES (@id, @session_id, @tool_call_id, @tool_name, @file_path, @original_content, @existed_before, @created_at)
+  `, snapshot as unknown as Record<string, unknown>)
+}
+
+export function getSnapshotsBySession(sessionId: string): DBFileSnapshot[] {
+  return getDb().prepare("SELECT * FROM file_snapshots WHERE session_id = ? ORDER BY created_at ASC").all(sessionId) as DBFileSnapshot[]
+}
+
 // ─── cleanup ──────────────────────────────────────────────────────────────────
 
 export function deleteSessionCascade(sessionId: string): void {
   // Cascade deletes run immediately (not batched) since they're cleanup-only
   const db = getDb()
   const tx = db.transaction(() => {
+    db.prepare("DELETE FROM file_snapshots WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM tool_results WHERE session_id = ?").run(sessionId)

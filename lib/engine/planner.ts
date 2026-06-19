@@ -30,6 +30,21 @@ const xiaomi = createOpenAI({
   apiKey: process.env.XIAOMI_API_KEY || "",
 })
 
+const cerebras = createOpenAI({
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "",
+})
+
+const routeway = createOpenAI({
+  baseURL: "https://api.routeway.ai/v1",
+  apiKey: process.env.ROUTEWAY_API_KEY || "",
+})
+
+const naga = createOpenAI({
+  baseURL: "https://api.naga.ac/v1",
+  apiKey: process.env.NAGA_API_KEY || "",
+})
+
 export function getLanguageModel(provider: AIProvider, modelId: string) {
   switch (provider) {
     case "openai":
@@ -47,6 +62,12 @@ export function getLanguageModel(provider: AIProvider, modelId: string) {
       return opencode.chat(modelId)
     case "xiaomi":
       return xiaomi.chat(modelId)
+    case "cerebras":
+      return cerebras.chat(modelId)
+    case "routeway":
+      return routeway.chat(modelId)
+    case "naga":
+      return naga.chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }

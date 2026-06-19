@@ -1,6 +1,6 @@
 "use client"
 
-import { PROVIDER_LIMITS } from "./provider-limits"
+import { getProviderLimits } from "./provider-limits"
 
 const STORAGE_KEY = "nightcode-usage-logs"
 
@@ -83,7 +83,7 @@ export function getUsageSummary(): ProviderModelStats[] {
     const key = `${e.provider}::${e.model}`
     let stats = map.get(key)
     if (!stats) {
-      const limits = PROVIDER_LIMITS[e.provider] ?? {}
+      const limits = getProviderLimits(e.provider, e.model)
       stats = {
         provider: e.provider,
         model: e.model,
