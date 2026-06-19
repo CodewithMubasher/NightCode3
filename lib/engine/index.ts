@@ -20,6 +20,12 @@ function generateId(): string {
 
 const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
 
+export interface EngineRunOptions {
+  depth?: number
+  silent?: boolean
+  tools?: string[]
+}
+
 export class NightCodeEngine {
   private emitter = new EventEmitter()
 
@@ -80,8 +86,9 @@ export class NightCodeEngine {
     skillInjected?: string,
     mcpTools?: ToolImplementation[],
     toolIsolation?: ToolIsolationService,
-    compactionService?: CompactionService
-  ): Promise<void> {
+    compactionService?: CompactionService,
+    options?: EngineRunOptions
+  ): Promise<string> {
     const config: ModeConfig = AGENT_CONFIG
 
     const basePrompt = buildSystemPrompt(mcpTools)
@@ -100,8 +107,19 @@ export class NightCodeEngine {
       .map((t) => TOOL_REGISTRY[t.name])
       .filter(Boolean)
 
+    // Add delegate_task for orchestrator (not sub-agents)
+    const delegateTaskTool = TOOL_REGISTRY["delegate_task"]
+    if (delegateTaskTool && (!options?.depth || options.depth < 1)) {
+      availableTools = [...availableTools, delegateTaskTool]
+    }
+
     if (mcpTools) {
       availableTools = [...availableTools, ...mcpTools]
+    }
+
+    if (options?.tools) {
+      const allowed = new Set(options.tools)
+      availableTools = availableTools.filter((t) => allowed.has(t.name))
     }
 
     // Build request — separate system prompt from conversation messages
@@ -142,6 +160,9 @@ export class NightCodeEngine {
             onText: (text) => {
               this.emitEvent("text_delta", { text })
             },
+            onReasoning: (text) => {
+              this.emitEvent("reasoning_delta", { text })
+            },
           },
           signal,
           requestSystemPrompt
@@ -161,16 +182,17 @@ export class NightCodeEngine {
 
         if (signal.aborted) break
 
-        // Persist step record BEFORE tool execution — tool isolation references step_id
-        createStep({
-          id: stepId,
-          session_id: messageId,
-          step_number: stepNumber,
-          input_tokens: null,
-          output_tokens: null,
-          finish_reason: step.type === "text" ? "stop" : "tool_calls",
-          created_at: Date.now(),
-        })
+        if (!options?.silent) {
+          createStep({
+            id: stepId,
+            session_id: messageId,
+            step_number: stepNumber,
+            input_tokens: null,
+            output_tokens: null,
+            finish_reason: step.type === "text" ? "stop" : "tool_calls",
+            created_at: Date.now(),
+          })
+        }
 
         // ── 2. Text response → done ────────────────────────────────────────────
         if (step.type === "text") {
@@ -190,11 +212,26 @@ export class NightCodeEngine {
 
         // Map tool calls with pre-assigned IDs and resolve tool definitions
         const normalize = (n: string) => n.replace(/-/g, "_").toLowerCase()
+        const toolAliases: Record<string, string> = {
+          create_file: "write_file",
+          make_file: "write_file",
+          new_file: "write_file",
+          create_directory: "create_folder",
+          make_folder: "create_folder",
+          remove_file: "delete_file",
+          list_files: "list_directory",
+          search_code: "search_files",
+        }
         const calls = step.toolCalls.map((tc) => {
           toolCallCount++
-          const toolDef = availableTools.find((t) => normalize(t.name) === normalize(tc.toolName))
+          const resolvedName = toolAliases[tc.toolName] ?? tc.toolName
+          const toolDef = availableTools.find((t) => normalize(t.name) === normalize(resolvedName))
           const generatedId = toolIsolation?.onToolStart(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
-          return { ...tc, toolDef, generatedId }
+          let args = tc.args
+          if (resolvedName === "delegate_task") {
+            args = { ...args, __provider: provider, __model: model, __depth: options?.depth ?? 0 }
+          }
+          return { ...tc, toolDef, generatedId, args, resolvedName }
         })
 
         // Handle unknown tools immediately
@@ -246,8 +283,8 @@ export class NightCodeEngine {
               return { tc, skipResult: false, success: true, data: forcedThink.data, forcedThink: true } as const
             }
 
-            if (["write_file", "delete_file", "create_folder"].includes(tc.toolName)) {
-              await this.takeFileSnapshot(tc.toolName, tc.args, tc.generatedId, messageId)
+            if (!options?.silent && ["write_file", "delete_file", "create_folder"].includes(tc.resolvedName)) {
+              await this.takeFileSnapshot(tc.resolvedName, tc.args, tc.generatedId, messageId)
             }
             const execResult = await executeTool(tc.toolDef!, tc.args)
             return { tc, ...execResult, skipResult: false, forcedThink: false } as const
@@ -417,11 +454,13 @@ export class NightCodeEngine {
         this.emitEvent("thinking", { text: finalText, toolCallCount })
       }
 
+      return finalText
     } catch (err) {
-      if (signal.aborted) return
+      if (signal.aborted) return ""
       this.emitEvent("error", {
         message: `Engine error: ${err instanceof Error ? err.message : "Unknown error"}`,
       })
+      return `Engine error: ${err instanceof Error ? err.message : "Unknown error"}`
     } finally {
       flushBatch()
       console.log("Emitting message_complete event")

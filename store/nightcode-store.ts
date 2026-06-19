@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData } from "@/types"
+import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData, Project } from "@/types"
+import { toast } from "sonner"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -18,13 +19,21 @@ function emptyMessage(id: string, role: "user" | "assistant", status: MessageSta
 interface NightCodeState {
   chats: Chat[]
   activeChatId: string | null
+  projects: Project[]
+  activeProjectId: string | null
   isStreaming: boolean
   askData: AskData | null
   settings: AppSettings
 
-  createChat: (model?: string, provider?: string) => string
+  createChat: (model?: string, provider?: string, projectId?: string) => string
   deleteChat: (id: string) => void
   setActiveChat: (id: string | null) => void
+
+  createProject: (name: string, description: string) => Promise<string>
+  renameProject: (id: string, name: string) => void
+  deleteProject: (id: string) => void
+  toggleStarProject: (id: string) => void
+  setActiveProject: (id: string | null) => void
 
   addMessage: (chatId: string, message: Message) => void
   updateMessageContent: (chatId: string, messageId: string, content: string) => void
@@ -53,6 +62,8 @@ export const useNightCodeStore = create<NightCodeState>()(
     (set, get) => ({
       chats: [],
       activeChatId: null,
+      projects: [],
+      activeProjectId: null,
       isStreaming: false,
       askData: null,
       settings: {
@@ -66,7 +77,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         enterToSend: true,
       },
 
-      createChat: (model, provider) => {
+      createChat: (model, provider, projectId) => {
         const id = generateId()
         const now = Date.now()
         const chat: Chat = {
@@ -77,6 +88,7 @@ export const useNightCodeStore = create<NightCodeState>()(
           provider: provider ?? "opencode",
           createdAt: now,
           updatedAt: now,
+          projectId,
         }
         set((s) => ({ chats: [...s.chats, chat], activeChatId: id }))
         return id
@@ -219,6 +231,57 @@ export const useNightCodeStore = create<NightCodeState>()(
           chats: s.chats.map((c) => (c.id === id ? { ...c, title, updatedAt: Date.now() } : c)),
         }))
       },
+
+      createProject: async (name, description) => {
+        const id = generateId()
+        const now = Date.now()
+        const project: Project = { id, name, description, starred: false, createdAt: now, updatedAt: now }
+        set((s) => ({ projects: [...s.projects, project], activeProjectId: id }))
+        const chatId = generateId()
+        const chatNow = Date.now()
+        const chat: Chat = {
+          id: chatId,
+          title: name,
+          messages: [],
+          model: "big-pickle",
+          provider: "opencode",
+          createdAt: chatNow,
+          updatedAt: chatNow,
+          projectId: id,
+        }
+        set((s) => ({ chats: [...s.chats, chat], activeChatId: chatId }))
+        try {
+          await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, name, description }),
+          })
+        } catch {
+          // workspace folder creation is best-effort
+        }
+        return chatId
+      },
+
+      renameProject: (id, name) => {
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === id ? { ...p, name, updatedAt: Date.now() } : p)),
+        }))
+      },
+
+      deleteProject: (id) => {
+        set((s) => ({
+          projects: s.projects.filter((p) => p.id !== id),
+          activeProjectId: s.activeProjectId === id ? null : s.activeProjectId,
+        }))
+      },
+
+      toggleStarProject: (id) => {
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === id ? { ...p, starred: !p.starred, updatedAt: Date.now() } : p)),
+        }))
+      },
+
+      setActiveProject: (id) => set({ activeProjectId: id }),
 
       cancelStream: () => {
         abortController?.abort()
@@ -412,6 +475,8 @@ export const useNightCodeStore = create<NightCodeState>()(
                   }
                   case "error": {
                     get().setMessageError(chatId, assistantMessage.id, true)
+                    const errMsg = (parsed.payload?.message as string) ?? "An error occurred"
+                    if (errMsg !== "An error occurred") toast.error(errMsg)
                     break
                   }
                   case "usage": {
@@ -516,6 +581,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       partialize: (state) => ({
         chats: state.chats,
         activeChatId: state.activeChatId,
+        projects: state.projects,
         settings: state.settings,
       }),
       onRehydrateStorage: () => (state) => {

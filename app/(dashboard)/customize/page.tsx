@@ -155,7 +155,7 @@ export default function CustomizePage() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col gap-6 overflow-y-auto p-6">
+    <div className="mx-auto flex h-full max-w-3xl flex-col gap-6 overflow-y-auto p-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground shrink-0">Customization</h1>
         <div className="flex items-center gap-2">

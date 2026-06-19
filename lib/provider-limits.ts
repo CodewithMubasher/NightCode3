@@ -34,6 +34,7 @@ export function getProviderLimits(provider: string, model: string): ProviderLimi
     xiaomi:     { rpm: 20,  rpd: 100,    tpm: 100000,  tpd: null },
     routeway:   { rpm: 10,  rpd: 100,    tpm: null,    tpd: null },
     naga:       { rpm: 15,  rpd: 120,    tpm: 40000,   tpd: 150000 },
+    sambanova:  { rpm: 30,  rpd: 1000,   tpm: 80000,   tpd: 2000000 },
   }
 
   return fallback[provider] ?? { rpm: null, rpd: null, tpm: null, tpd: null }

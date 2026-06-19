@@ -51,9 +51,10 @@ export interface Chat {
   model: string
   provider: string
   updatedAt: number
+  projectId?: string
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova"
 
 export type View = "chat" | "settings" | "projects"
 
@@ -87,4 +88,13 @@ export interface AppSettings {
   maxTokens: number
   soundEnabled: boolean
   enterToSend: boolean
+}
+
+export interface Project {
+  id: string
+  name: string
+  description: string
+  starred: boolean
+  createdAt: number
+  updatedAt: number
 }

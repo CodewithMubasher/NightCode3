@@ -1,9 +1,11 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useTheme } from "next-themes"
-import { Gift, FileText, Sun, Moon } from "lucide-react"
+import { useNightCodeStore } from "@/store/nightcode-store"
+import { FileText, Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Context,
@@ -52,7 +54,7 @@ function ProviderUsageSection() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-h-[300px] overflow-y-auto scrollbar-none">
       <span className="text-[11px] font-medium text-muted-foreground">Provider Rate Limits</span>
       {Array.from(byProvider.entries()).map(([provider, models]) => (
         <div key={provider}>
@@ -110,6 +112,11 @@ function useTpdTotals(): [number, number] {
 
 export function TopHeader() {
   const { resolvedTheme, setTheme } = useTheme()
+  const pathname = usePathname()
+  const isChatPage = pathname.startsWith("/chat/")
+  const activeChatId = useNightCodeStore((s) => s.activeChatId)
+  const chats = useNightCodeStore((s) => s.chats)
+  const projects = useNightCodeStore((s) => s.projects)
   const [totalReq, totalRpd] = useTpdTotals()
   const [hasStats, setHasStats] = React.useState(false)
 
@@ -126,19 +133,25 @@ export function TopHeader() {
   const used = totalReq
   const max = totalRpd || 1
 
+  const activeChat = activeChatId ? chats.find((c) => c.id === activeChatId) : null
+  const contextProject = activeChat?.projectId ? projects.find((p) => p.id === activeChat.projectId) : null
+
   function togglePanel() {
     window.dispatchEvent(new CustomEvent("toggle-artifact-panel"))
   }
 
   return (
-    <header className="sticky top-0 z-50 flex h-12 items-center gap-2 bg-background/10 px-4 backdrop-blur-sm">
+    <header className="sticky top-0 z-50 flex h-12 items-center gap-2 bg-background/10 px-2 sm:px-4 backdrop-blur-sm">
       <SidebarTrigger />
-      <div className="flex flex-1 justify-center">
-        <div className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border bg-muted/50 px-5 py-1.5 text-xs font-medium transition-colors hover:bg-muted">
-          <Gift size={14} style={{ color: "#0099ff" }} />
-          Upgrade for Free
-        </div>
-      </div>
+      <div className="flex flex-1" />
+      {isChatPage && contextProject && (
+        <span className="absolute left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+          <span>{contextProject.name}</span>
+          <span className="text-muted-foreground/50">–</span>
+          <span className="text-foreground">{activeChat!.title}</span>
+        </span>
+      )}
+      <div className="flex flex-1" />
       <div className="flex items-center gap-1">
         <Context usedTokens={used} maxTokens={max}>
           <ContextTrigger />

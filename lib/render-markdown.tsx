@@ -157,9 +157,17 @@ function renderInline(fullContent: string, line: string): ReactNode {
     const codeMatch = remaining.match(/^`([^`]+)`/)
     if (codeMatch) {
       parts.push(
-        <code key={key++} className="rounded bg-muted/70 px-1 py-0.5 text-xs font-mono text-foreground">
+        <span
+          key={key++}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.3 text-[12px] font-sans"
+          style={{
+            background: "#1A1A1A",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "#B3B3B3",
+          }}
+        >
           {codeMatch[1]}
-        </code>
+        </span>
       )
       remaining = remaining.slice(codeMatch[0].length)
       continue

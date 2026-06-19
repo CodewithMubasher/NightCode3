@@ -45,6 +45,11 @@ const naga = createOpenAI({
   apiKey: process.env.NAGA_API_KEY || "",
 })
 
+const sambanova = createOpenAI({
+  baseURL: "https://api.sambanova.ai/v1",
+  apiKey: process.env.SAMBANOVA_API_KEY || "",
+})
+
 export function getLanguageModel(provider: AIProvider, modelId: string) {
   switch (provider) {
     case "openai":
@@ -68,6 +73,8 @@ export function getLanguageModel(provider: AIProvider, modelId: string) {
       return routeway.chat(modelId)
     case "naga":
       return naga.chat(modelId)
+    case "sambanova":
+      return sambanova.chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }
@@ -75,9 +82,13 @@ export function getLanguageModel(provider: AIProvider, modelId: string) {
 
 // ─── Schema builder ────────────────────────────────────────────────────────────
 
-function buildZodSchema(schema: Record<string, string>): z.ZodObject<any> {
+function buildZodSchema(schema: Record<string, string | z.ZodTypeAny>): z.ZodObject<any> {
   const shape: Record<string, z.ZodTypeAny> = {}
   for (const [key, type] of Object.entries(schema)) {
+    if (type instanceof z.ZodType) {
+      shape[key] = type
+      continue
+    }
     const isOptional = type.endsWith("?")
     const baseType = type.replace("?", "").trim()
     let zodType: z.ZodTypeAny
@@ -113,6 +124,7 @@ export type StepResult =
 
 export type PlannerCallbacks = {
   onText?: (text: string) => void
+  onReasoning?: (text: string) => void
 }
 
 // ─── Single-step planner ───────────────────────────────────────────────────────
@@ -242,6 +254,8 @@ export async function planStep(
     for await (const chunk of result.fullStream) {
       if (chunk.type === "text-delta") {
         collectedText += chunk.text
+      } else if (chunk.type === "reasoning-delta") {
+        if (callbacks.onReasoning) callbacks.onReasoning(chunk.text)
       } else if (chunk.type === "tool-call") {
         collectedToolCalls.push({
           toolCallId: chunk.toolCallId,

@@ -19,7 +19,6 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "create_folder" },
     { name: "search_files" },
     { name: "execute_command" },
-    { name: "think" },
     { name: "create_artifact" },
     { name: "list_artifacts" },
     { name: "read_artifact" },

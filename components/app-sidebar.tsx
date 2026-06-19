@@ -33,6 +33,7 @@ import {
   Trash2,
   ArrowRightFromLine,
   Blocks,
+  Folder,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -58,6 +59,7 @@ export function AppSidebar() {
   const [hydrated, setHydrated] = React.useState(false)
   React.useEffect(() => { setHydrated(true) }, [])
   const chats = useNightCodeStore((s) => s.chats)
+  const projects = useNightCodeStore((s) => s.projects)
 
   const recentChats = hydrated
     ? [...chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 15)
@@ -72,15 +74,15 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarSeparator />
-      <SidebarContent>
+      <SidebarContent className="mobile-sidebar-content">
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {navItems.map((item, idx) => {
                 if (item.isNav) {
                   return (
-                    <SidebarMenuItem key={item.label}>
+                    <SidebarMenuItem key={item.label} className="mobile-sidebar-item" style={{ animationDelay: `${idx * 0.04}s` }}>
                       <SidebarMenuButton asChild>
                         <Link href={item.href ?? "#"}>
                           <item.icon />
@@ -106,15 +108,29 @@ export function AppSidebar() {
         </SidebarGroup>
         <SidebarSeparator />
         <SidebarGroup>
-          <SidebarGroupLabel>Notes</SidebarGroupLabel>
+          <SidebarGroupLabel>Projects</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton>
-                  <Plus />
-                  <span>New Notebook</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {projects.map((project, idx) => (
+                <SidebarMenuItem key={project.id} className="mobile-sidebar-item" style={{ animationDelay: `${(navItems.length + idx) * 0.04}s` }}>
+                  <SidebarMenuButton asChild>
+                    <Link href={`/projects/${project.id}`}>
+                      <Folder size={14} />
+                      <span className="truncate">{project.name}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+              {projects.length === 0 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/projects">
+                      <Plus />
+                      <span>New Project</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -224,6 +240,26 @@ export function AppSidebar() {
           </DropdownMenu>
         </div>
       </SidebarFooter>
+      <style>{`
+        @keyframes sidebar-item-in {
+          from { opacity: 0; transform: translateX(-12px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div {
+          opacity: 0;
+          animation: sidebar-item-in 0.3s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+        }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(1) { animation-delay: 0.02s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(2) { animation-delay: 0.04s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(3) { animation-delay: 0.06s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(4) { animation-delay: 0.08s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(5) { animation-delay: 0.1s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(6) { animation-delay: 0.12s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(7) { animation-delay: 0.14s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(8) { animation-delay: 0.16s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(9) { animation-delay: 0.18s; }
+        [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(10) { animation-delay: 0.2s; }
+      `}</style>
     </Sidebar>
   )
 }

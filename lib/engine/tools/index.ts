@@ -1,3 +1,4 @@
+import { z } from "zod"
 import { readFileTool } from "./read-file"
 import { writeFileTool } from "./write-file"
 import { listDirectoryTool } from "./list-directory"
@@ -5,16 +6,16 @@ import { deleteFileTool } from "./delete-file"
 import { createFolderTool } from "./create-folder"
 import { searchFilesTool } from "./search-files"
 import { executeCommandTool } from "./execute-command"
-import { thinkTool } from "./think"
 import { createArtifactTool } from "./create-artifact"
 import { askTool } from "./ask"
 import { listArtifactsTool, readArtifactTool, editArtifactTool } from "./artifact-tools"
 import { searchMemoriesTool } from "./search-memories"
+import { delegateTaskTool } from "./delegate-task"
 
 export interface ToolImplementation {
   name: string
   description: string
-  schema: Record<string, string>
+  schema: Record<string, string | z.ZodTypeAny>
   execute: (args: any) => Promise<ToolResult>
   verify: (args: any, result: any) => Promise<VerificationResult>
 }
@@ -41,7 +42,7 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   create_folder: createFolderTool,
   search_files: searchFilesTool,
   execute_command: executeCommandTool,
-  think: thinkTool,
+  delegate_task: delegateTaskTool,
   create_artifact: createArtifactTool,
   ask: askTool,
   list_artifacts: listArtifactsTool,

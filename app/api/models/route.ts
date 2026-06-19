@@ -9,13 +9,10 @@ const XIAOMI_KEY = process.env.XIAOMI_API_KEY
 const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
 const ROUTEWAY_KEY = process.env.ROUTEWAY_API_KEY
 const NAGA_KEY = process.env.NAGA_API_KEY
+const SAMBANOVA_KEY = process.env.SAMBANOVA_API_KEY
 const PUTER_ENABLED = true
 
-const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
-  { id: "llama-3.3-70b-versatile", display_name: "Llama 3.3 70B Versatile", provider: "groq", provider_display_name: "Groq" },
-  { id: "llama-3.1-8b-instant", display_name: "Llama 3.1 8B Instant", provider: "groq", provider_display_name: "Groq" },
-  { id: "mixtral-8x7b-32768", display_name: "Mixtral 8x7B", provider: "groq", provider_display_name: "Groq" },
-]
+const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = []
 
 const GOOGLE_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
   { id: "gemini-2.5-flash", display_name: "Gemini 2.5 Flash", provider: "google", provider_display_name: "Google" },
@@ -23,6 +20,28 @@ const GOOGLE_MODELS: { id: string; display_name: string; provider: string; provi
   { id: "gemini-2.0-flash", display_name: "Gemini 2.0 Flash", provider: "google", provider_display_name: "Google" },
   { id: "gemini-2.0-flash-lite", display_name: "Gemini 2.0 Flash Lite", provider: "google", provider_display_name: "Google" },
 ]
+
+async function fetchGroqModels() {
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${GROQ_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const exclude = new Set(["whisper", "compound", "guard", "orpheus"])
+    const models = (json.data || [])
+      .filter((m: any) => m.id && !exclude.has(m.id.split("/")[0]?.split("-")[0]) && !m.id.includes("whisper") && !m.id.includes("guard") && !m.id.includes("compound") && !m.id.includes("orpheus") && !m.id.includes("prompt-guard"))
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "groq",
+        provider_display_name: "Groq",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
 
 async function fetchOpenRouterModels() {
   try {
@@ -151,6 +170,27 @@ async function fetchNagaModels() {
   }
 }
 
+async function fetchSambaNovaModels() {
+  try {
+    const res = await fetch("https://api.sambanova.ai/v1/models", {
+      headers: { Authorization: `Bearer ${SAMBANOVA_KEY}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "sambanova",
+        provider_display_name: "SambaNova",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchXiaomiModels() {
   try {
     const res = await fetch("https://api.xiaomimimo.com/v1/models", {
@@ -194,10 +234,13 @@ export async function GET() {
   const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
   if (GROQ_KEY) {
-    groups.push({
-      label: "Groq",
-      models: GROQ_MODELS,
-    })
+    const groqModels = await fetchGroqModels()
+    if (groqModels) {
+      groups.push({
+        label: "Groq",
+        models: groqModels,
+      })
+    }
   }
 
   if (GOOGLE_KEY) {
@@ -273,6 +316,16 @@ export async function GET() {
       groups.push({
         label: "Naga",
         models: nagaModels,
+      })
+    }
+  }
+
+  if (SAMBANOVA_KEY) {
+    const snModels = await fetchSambaNovaModels()
+    if (snModels) {
+      groups.push({
+        label: "SambaNova",
+        models: snModels,
       })
     }
   }

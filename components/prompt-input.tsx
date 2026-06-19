@@ -348,7 +348,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
             >
               <Mic size={14} />
             </button>
-            {value.trim() && (
+            {(value.trim() || disabled) && (
               <button
                 onClick={disabled ? () => useNightCodeStore.getState().cancelStream() : handleSubmit}
                 className="flex size-7 items-center justify-center rounded-full text-white transition-all hover:opacity-90 disabled:opacity-50"

@@ -4,8 +4,8 @@ import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react
 import type { Message, ToolState } from "@/types"
 import {
   Copy, Check, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse, RotateCcw,
-  CheckCircle2, ChevronDown, Circle,
-  FileText, FilePen, Terminal, Trash2, List, Brain, FolderCheck, BookOpen, Cable,
+  CheckCircle2, ChevronDown, ChevronRight, Circle,
+  FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot,
 } from "lucide-react"
 import {
   Attachments,
@@ -17,7 +17,7 @@ import { useNightCodeStore } from "@/store/nightcode-store"
 
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)/)
-  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill"].includes(toolName)) {
+  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task"].includes(toolName)) {
     return Cable
   }
   switch (toolName) {
@@ -26,13 +26,13 @@ function toolIcon(toolName: string) {
     case "list_directory": return List
     case "delete_file": return Trash2
     case "execute_command": return Terminal
-    case "think": return Brain
     case "create_artifact": return FilePen
     case "edit_artifact": return FilePen
     case "list_artifacts": return List
     case "read_artifact": return FileText
     case "create_folder": return FolderCheck
     case "skill": return BookOpen
+    case "delegate_task": return Bot
     default: return Circle
   }
 }
@@ -50,7 +50,53 @@ function toolArgs(toolState: ToolState): string | null {
   if (slug) return slug
   const prompt = toolState.args?.prompt as string | undefined
   if (prompt) return prompt.length > 40 ? prompt.slice(0, 40) + "..." : prompt
+  const focus = toolState.args?.focus as string | undefined
+  if (focus && toolState.tool === "delegate_task") return focus
   return null
+}
+
+function DelegateSummary({ summary }: { summary: string }) {
+  const [open, setOpen] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [contentHeight, setContentHeight] = useState(0)
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setContentHeight(contentRef.current.scrollHeight)
+    }
+  }, [summary])
+
+  return (
+    <div className="mx-7 mt-2 mb-1 overflow-hidden rounded-md border border-white/10 bg-white/[0.03]">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium text-[#999] transition-colors hover:bg-white/5"
+      >
+        <ChevronDown
+          size={12}
+          style={{
+            transition: "transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)",
+            transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+          }}
+        />
+        Sub-agent findings
+      </button>
+      <div
+        style={{
+          overflow: "hidden",
+          transition: open ? "none" : "max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)",
+          maxHeight: open ? `${contentHeight}px` : "0px",
+          opacity: open ? 1 : 0,
+        }}
+      >
+        <div ref={contentRef}>
+          <div className="border-t border-white/10 px-2.5 py-2 text-[13px] leading-relaxed text-[#ccc]">
+            {renderInlineMarkdown(summary)}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 interface ToolTimelineItemProps {
@@ -68,7 +114,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   const textColor = isFailed ? "#EF4444" : "#E0E0E0"
 
   const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
-  const isToolThink = toolState.tool === "think"
+  const isDelegate = toolState.tool === "delegate_task"
 
   const toolLabels: Record<string, (a: string | null) => string> = {
     write_file: () => "Created",
@@ -84,10 +130,9 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     execute_command: () => "Run command",
     think: () => "Thinking",
     skill: () => "Read skill",
+    delegate_task: () => "Sub-agent",
   }
   const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
-
-  const thoughtText = toolState.args?.thought as string | undefined
 
   return (
     <div className="relative flex flex-col gap-1">
@@ -99,7 +144,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
           <span className="text-[14px] font-sans" style={{ color: textColor }}>
             {label}
           </span>
-          {args && isFilePath && !isToolThink && (
+          {args && isFilePath && (
             <span
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
               style={{
@@ -112,7 +157,19 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
               {args}
             </span>
           )}
-          {args && !isFilePath && !isToolThink && (
+          {args && !isFilePath && !isDelegate && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
+              style={{
+                background: "#1A1A1A",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#B3B3B3",
+              }}
+            >
+              {args}
+            </span>
+          )}
+          {isDelegate && args && (
             <span
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
               style={{
@@ -126,10 +183,8 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
           )}
         </div>
       </div>
-      {isToolThink && thoughtText && (
-        <div className="ml-7 mr-2 rounded-md border border-white/10 bg-white/[0.03] p-2.5 text-[13px] leading-relaxed text-[#999] font-mono whitespace-pre-wrap">
-          {thoughtText}
-        </div>
+      {isDelegate && toolState.result && typeof toolState.result.summary === "string" && (
+        <DelegateSummary summary={toolState.result.summary} />
       )}
     </div>
   )

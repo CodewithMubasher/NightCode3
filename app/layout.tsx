@@ -3,6 +3,7 @@ import "@fontsource-variable/geist-mono/wght.css"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SettingsApplier } from "@/components/settings-applier"
+import { Toaster } from "@/components/ui/sonner"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = {
@@ -25,6 +26,7 @@ export default function RootLayout({
         <ThemeProvider>
           <SettingsApplier />
           {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

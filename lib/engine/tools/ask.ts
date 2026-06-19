@@ -1,3 +1,4 @@
+import { z } from "zod"
 import type { AskQuestion } from "@/types"
 
 export const askTool = {
@@ -20,14 +21,33 @@ Example questions JSON:
   }
 ]`,
   schema: {
-    questions: "string",
+    questions: z.union([
+      z.array(z.object({
+        id: z.string(),
+        question: z.string(),
+        type: z.enum(["select", "multiselect", "text"]).optional(),
+        options: z.array(z.object({
+          label: z.string(),
+          value: z.string(),
+          description: z.string().optional(),
+        })).optional(),
+        allowCustom: z.boolean().optional(),
+      })),
+      z.string(),
+    ]),
   },
-  async execute(args: { questions: string }) {
+  async execute(args: { questions: string | AskQuestion[] | any[] }) {
     let parsed: AskQuestion[]
-    try {
-      parsed = JSON.parse(args.questions) as AskQuestion[]
-    } catch {
-      return { success: false, error: "Invalid questions JSON" }
+    if (typeof args.questions === "string") {
+      try {
+        parsed = JSON.parse(args.questions) as AskQuestion[]
+      } catch {
+        return { success: false, error: "Invalid questions JSON" }
+      }
+    } else if (Array.isArray(args.questions)) {
+      parsed = args.questions as AskQuestion[]
+    } else {
+      return { success: false, error: "Questions must be a JSON string or array" }
     }
     return { success: true, data: { action: "ask", questions: parsed } }
   },

@@ -221,7 +221,6 @@ export class ToolIsolationService {
       }
 
       case "ask":
-      case "think":
         return record
 
       default:

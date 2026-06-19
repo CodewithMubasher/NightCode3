@@ -22,7 +22,7 @@ export function SuggestionPills({ onSelect, disabled }: SuggestionPillsProps) {
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-      <div className="flex items-center justify-center gap-2">
+      <div className="hidden sm:flex items-center justify-center gap-2">
         {SUGGESTIONS.map(({ icon: Icon, label, prompt }, i) => (
           <button
             key={label}
