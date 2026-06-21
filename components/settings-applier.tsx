@@ -15,10 +15,14 @@ export function SettingsApplier() {
   }, [settings.primaryColor])
 
   useEffect(() => {
-    if (resolvedTheme) {
-      setSettings({ theme: resolvedTheme as "dark" | "light" })
+    document.documentElement.classList.toggle("reduce-motion", settings.reducedMotion)
+  }, [settings.reducedMotion])
+
+  useEffect(() => {
+    if (resolvedTheme && settings.theme !== "system") {
+      setSettings({ theme: resolvedTheme as "dark" | "light" | "system" })
     }
-  }, [resolvedTheme, setSettings])
+  }, [resolvedTheme, setSettings, settings.theme])
 
   return null
 }

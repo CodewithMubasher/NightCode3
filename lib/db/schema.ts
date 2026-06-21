@@ -11,6 +11,7 @@ export function getDb(): Database.Database {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
     db = new Database(DB_PATH)
     db.pragma("journal_mode = WAL")
+    db.pragma("busy_timeout = 5000")
     db.pragma("foreign_keys = ON")
   }
   return db
@@ -100,6 +101,25 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_events_session ON agent_events(session_id);
     CREATE INDEX IF NOT EXISTS idx_compactions_session ON compactions(session_id);
     CREATE INDEX IF NOT EXISTS idx_file_snapshots_session ON file_snapshots(session_id);
+
+    CREATE TABLE IF NOT EXISTS account_keys (
+      env_name      TEXT NOT NULL,
+      key_value     TEXT NOT NULL,
+      account_label TEXT NOT NULL DEFAULT 'default',
+      updated_at    INTEGER NOT NULL,
+      UNIQUE(env_name, account_label)
+    );
+
+    CREATE TABLE IF NOT EXISTS accounts (
+      label TEXT PRIMARY KEY
+    );
+
+    INSERT OR IGNORE INTO accounts (label) VALUES ('default');
+
+    CREATE TABLE IF NOT EXISTS provider_accounts (
+      env_name       TEXT PRIMARY KEY,
+      account_label  TEXT NOT NULL DEFAULT 'default'
+    );
   `)
 }
 

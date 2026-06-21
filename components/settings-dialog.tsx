@@ -1,12 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { X, Settings, Key, Box, Palette, Keyboard, Info, Monitor, Sun, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
+import { useNightCodeStore } from "@/store/nightcode-store"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type SettingsTab = "general" | "api-keys" | "models" | "appearance" | "keybindings" | "about"
 
@@ -69,6 +77,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             <button
               onClick={onClose}
               className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Close settings"
             >
               <X size={18} />
             </button>
@@ -116,9 +125,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function GeneralTab() {
-  const [theme, setTheme] = useState("dark")
-  const [enterSend, setEnterSend] = useState(true)
-  const [sound, setSound] = useState(false)
+  const settings = useNightCodeStore((s) => s.settings)
+  const setSettings = useNightCodeStore((s) => s.setSettings)
 
   return (
     <div className="space-y-1">
@@ -127,10 +135,10 @@ function GeneralTab() {
       <SettingRow label="Theme" description="Choose your preferred appearance">
         <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
           <button
-            onClick={() => setTheme("dark")}
+            onClick={() => setSettings({ theme: "dark" })}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-              theme === "dark"
+              settings.theme === "dark"
                 ? "bg-[var(--primary-color)]/10 text-[var(--primary-color)]"
                 : "text-muted-foreground hover:text-foreground"
             )}
@@ -139,10 +147,10 @@ function GeneralTab() {
             Dark
           </button>
           <button
-            onClick={() => setTheme("light")}
+            onClick={() => setSettings({ theme: "light" })}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-              theme === "light"
+              settings.theme === "light"
                 ? "bg-[var(--primary-color)]/10 text-[var(--primary-color)]"
                 : "text-muted-foreground hover:text-foreground"
             )}
@@ -151,10 +159,10 @@ function GeneralTab() {
             Light
           </button>
           <button
-            onClick={() => setTheme("system")}
+            onClick={() => setSettings({ theme: "system" })}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors",
-              theme === "system"
+              settings.theme === "system"
                 ? "bg-[var(--primary-color)]/10 text-[var(--primary-color)]"
                 : "text-muted-foreground hover:text-foreground"
             )}
@@ -174,54 +182,77 @@ function GeneralTab() {
       </SettingRow>
       <Separator />
       <SettingRow label="Enter to send" description="Press Enter to send, Shift+Enter for new line">
-        <Switch checked={enterSend} onCheckedChange={setEnterSend} />
+        <Switch checked={settings.enterToSend} onCheckedChange={(v) => setSettings({ enterToSend: v })} />
       </SettingRow>
       <Separator />
       <SettingRow label="Sound" description="Play sound on new messages">
-        <Switch checked={sound} onCheckedChange={setSound} />
+        <Switch checked={settings.soundEnabled} onCheckedChange={(v) => setSettings({ soundEnabled: v })} />
+      </SettingRow>
+      <Separator />
+      <SettingRow label="Reduce motion" description="Disable animations and transitions">
+        <Switch checked={settings.reducedMotion} onCheckedChange={(v) => setSettings({ reducedMotion: v })} />
       </SettingRow>
     </div>
   )
 }
 
 function ApiKeysTab() {
-  const providers = [
-    { name: "OpenAI", key: "sk-...1234", env: "OPENAI_API_KEY" },
-    { name: "OpenRouter", key: "sk-or-...5678", env: "OPENROUTER_API_KEY" },
-    { name: "Google", key: "AIza...90ab", env: "GOOGLE_GENERATIVE_AI_API_KEY" },
-    { name: "Groq", key: "gsk_...cdef", env: "GROQ_API_KEY" },
-    { name: "xAI", key: "xai-...ghij", env: "XAI_API_KEY" },
-    { name: "Naga", key: "naga-...klmn", env: "NAGA_API_KEY" },
-    { name: "Cloudflare", key: "", env: "CLOUDFLARE_API_TOKEN" },
-    { name: "DeepSeek", key: "sk-...opqr", env: "DEEPSEEK_API_KEY" },
-  ]
+  const [providers, setProviders] = useState<{ env_name: string; display_name: string; account_label: string }[]>([])
+  const [allAccounts, setAllAccounts] = useState<string[]>([])
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/keys")
+      if (!res.ok) return
+      const data = await res.json()
+      setProviders(data.providers)
+      setAllAccounts(data.accounts)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const handleChange = (env_name: string, account_label: string) => {
+    fetch("/api/keys", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env_name, account_label }),
+    })
+    setProviders((prev) =>
+      prev.map((p) => (p.env_name === env_name ? { ...p, account_label } : p))
+    )
+  }
 
   return (
     <div className="space-y-1">
       <SectionTitle>API Keys</SectionTitle>
       <p className="mb-3 text-xs text-muted-foreground">
-        Manage your provider API keys. Keys are stored locally and never shared.
+        Select which account's key to use for each provider.
       </p>
       <Separator className="mb-2" />
-      <div className="space-y-3">
+      <div className="space-y-2">
         {providers.map((p) => (
-          <div key={p.name}>
-            <div className="flex items-center justify-between gap-4 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-foreground">{p.name}</p>
-                <p className="text-xs text-muted-foreground">{p.env}</p>
+          <div key={p.env_name}>
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <div>
+                <p className="text-sm text-foreground">{p.display_name}</p>
+                <p className="text-[10px] text-muted-foreground">{p.env_name}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  defaultValue={p.key}
-                  className="h-7 w-44 text-xs"
-                  type="password"
-                  placeholder="Enter API key"
-                />
-                <Button size="xs" variant="outline">
-                  Save
-                </Button>
-              </div>
+              <Select
+                value={p.account_label}
+                onValueChange={(v) => handleChange(p.env_name, v)}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {allAccounts.map((acc) => (
+                    <SelectItem key={acc} value={acc}>{acc}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Separator />
           </div>

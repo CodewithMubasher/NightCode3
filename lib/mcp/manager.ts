@@ -36,13 +36,18 @@ export async function connectMCP(config: MCPConfig): Promise<string[]> {
     const timeoutMs = 10_000
     const connectPromise = client.connect(transport)
     const toolsPromise = connectPromise.then(() => client.listTools())
+    let timer: ReturnType<typeof setTimeout> | undefined
     const timeoutPromise = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(`MCP connection timed out after ${timeoutMs}ms`)), timeoutMs)
-      // Clean up timer if the other promise settles first
-      Promise.race([connectPromise, toolsPromise]).finally(() => clearTimeout(timer))
+      timer = setTimeout(() => reject(new Error(`MCP connection timed out after ${timeoutMs}ms`)), timeoutMs)
     })
 
-    const toolsResult = await Promise.race([toolsPromise, timeoutPromise])
+    let toolsResult: Awaited<ReturnType<typeof client.listTools>>
+    try {
+      toolsResult = await Promise.race([toolsPromise, timeoutPromise])
+    } finally {
+      clearTimeout(timer)
+    }
+    clearTimeout(timer)
     const toolNames = (toolsResult.tools ?? []).map((t) => t.name)
 
     connections.set(config.name, { config, client })
@@ -71,7 +76,7 @@ export async function disconnectAll(): Promise<void> {
 export function getConnectedToolNames(): string[] {
   const names: string[] = []
   for (const [, conn] of connections) {
-    names.push(...conn.config.name)
+    names.push(conn.config.name)
   }
   return names
 }

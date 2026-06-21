@@ -79,8 +79,14 @@ export interface AskData {
   questions: AskQuestion[]
 }
 
+export interface PendingConfirmation {
+  path: string
+  fileCount: number
+  toolCallId: string
+}
+
 export interface AppSettings {
-  theme: "dark" | "light"
+  theme: "dark" | "light" | "system"
   primaryColor: string
   defaultModel: string
   defaultProvider: string
@@ -88,6 +94,7 @@ export interface AppSettings {
   maxTokens: number
   soundEnabled: boolean
   enterToSend: boolean
+  reducedMotion: boolean
 }
 
 export interface Project {

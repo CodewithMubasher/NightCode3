@@ -249,7 +249,7 @@ function StudioCanvas() {
         <div className="absolute right-2 top-2 z-10 h-[calc(100%-16px)] w-56 overflow-y-auto rounded-lg border border-white/10 bg-neutral-900/90 shadow-lg backdrop-blur-sm">
           <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
             <span className="text-xs font-medium text-neutral-400">Configure</span>
-            <button onClick={() => setShowConfig(false)} className="text-neutral-500 hover:text-neutral-300">
+            <button onClick={() => setShowConfig(false)} className="text-neutral-500 hover:text-neutral-300" aria-label="Close configuration">
               <Terminal size={14} />
             </button>
           </div>

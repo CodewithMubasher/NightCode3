@@ -3,8 +3,9 @@ import { loadMCPConfigs } from "@/lib/mcp/storage"
 import { connectMCP, disconnectAll } from "@/lib/mcp/manager"
 import { createGroq } from "@ai-sdk/groq"
 import { generateText } from "ai"
+import { getApiKey } from "@/lib/keys"
 
-const groq = createGroq({ apiKey: process.env.GROQ_API_KEY })
+const groq = createGroq({ apiKey: getApiKey("GROQ_API_KEY") })
 
 interface RawNode {
   id: string

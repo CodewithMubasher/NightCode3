@@ -6,10 +6,16 @@ export async function executeTool(
 ): Promise<ToolResult> {
   const start = performance.now()
   try {
-    const timeout = new Promise<ToolResult>((_, reject) =>
-      setTimeout(() => reject(new Error("Tool execution timed out after 30 seconds")), 30_000)
-    )
-    const result = await Promise.race([tool.execute(args), timeout])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<ToolResult>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Tool execution timed out after 30 seconds")), 30_000)
+    })
+    let result: ToolResult
+    try {
+      result = await Promise.race([tool.execute(args), timeout])
+    } finally {
+      clearTimeout(timer)
+    }
     const executionTime = performance.now() - start
     if (result.success) {
       return { ...result, data: { ...result.data, executionTime } }

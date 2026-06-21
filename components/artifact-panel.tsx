@@ -161,7 +161,7 @@ export function ArtifactPanel() {
         <div className="flex h-14 items-center gap-2 px-4 border-b border-sidebar-border shrink-0">
           {showReader && activeArtifact ? (
             <>
-              <Button variant="ghost" size="icon-sm" onClick={() => setActiveArtifactId(null)}>
+              <Button variant="ghost" size="icon-sm" onClick={() => setActiveArtifactId(null)} aria-label="Back to artifact list">
                 <ChevronLeft className="size-4" />
               </Button>
               <div className="flex flex-1 items-center justify-center min-w-0">
@@ -179,13 +179,13 @@ export function ArtifactPanel() {
                 </span>
               </div>
               <div className="flex items-center gap-0.5">
-                <Button variant="ghost" size="icon-sm" onClick={() => handleCopy(activeArtifact.content)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => handleCopy(activeArtifact.content)} aria-label="Copy artifact">
                   <Copy className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => handleDownload(activeArtifact)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => handleDownload(activeArtifact)} aria-label="Download artifact">
                   <Download className="size-4" />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={() => setIsOpen(false)}>
+                <Button variant="ghost" size="icon-sm" onClick={() => setIsOpen(false)} aria-label="Close artifact viewer">
                   <X className="size-4" />
                 </Button>
               </div>
@@ -193,7 +193,7 @@ export function ArtifactPanel() {
           ) : (
             <>
               <span className="text-sm font-semibold">Artifacts ({artifacts.length})</span>
-              <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => setIsOpen(false)}>
+              <Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => setIsOpen(false)} aria-label="Close panel">
                 <X className="size-4" />
               </Button>
             </>
@@ -261,6 +261,7 @@ export function ArtifactPanel() {
                         if (activeArtifactId === artifact.id) setActiveArtifactId(null)
                       }}
                       className="mr-2 flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/50 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-red-400 group-hover:opacity-100"
+                      aria-label="Delete artifact"
                     >
                       <Trash2 className="size-3.5" />
                     </button>

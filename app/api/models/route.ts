@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server"
 
-const GROQ_KEY = process.env.GROQ_API_KEY
-const GOOGLE_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
-const OPENCODE_KEY = process.env.OPENCODE_API_KEY
-const OLLAMA_KEY = process.env.OLLAMA_CLOUD_API_KEY
-const XIAOMI_KEY = process.env.XIAOMI_API_KEY
-const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
-const ROUTEWAY_KEY = process.env.ROUTEWAY_API_KEY
-const NAGA_KEY = process.env.NAGA_API_KEY
-const SAMBANOVA_KEY = process.env.SAMBANOVA_API_KEY
-const CLOUDFLARE_KEY = process.env.CLOUDFLARE_API_TOKEN
+import { getApiKey } from "@/lib/keys"
+
+const GROQ_KEY = () => getApiKey("GROQ_API_KEY")
+const GOOGLE_KEY = () => getApiKey("GOOGLE_GENERATIVE_AI_API_KEY")
+const OPENROUTER_KEY = () => getApiKey("OPENROUTER_API_KEY")
+const OPENCODE_KEY = () => getApiKey("OPENCODE_API_KEY")
+const OLLAMA_KEY = () => getApiKey("OLLAMA_CLOUD_API_KEY")
+const XIAOMI_KEY = () => getApiKey("XIAOMI_API_KEY")
+const CEREBRAS_KEY = () => getApiKey("CEREBRAS_API_KEY")
+const ROUTEWAY_KEY = () => getApiKey("ROUTEWAY_API_KEY")
+const NAGA_KEY = () => getApiKey("NAGA_API_KEY")
+const SAMBANOVA_KEY = () => getApiKey("SAMBANOVA_API_KEY")
+const CLOUDFLARE_KEY = () => getApiKey("CLOUDFLARE_API_TOKEN")
 const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = []
@@ -32,7 +34,7 @@ const GOOGLE_MODELS: { id: string; display_name: string; provider: string; provi
 async function fetchGroqModels() {
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${GROQ_KEY}` },
+      headers: { Authorization: `Bearer ${GROQ_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -54,7 +56,7 @@ async function fetchGroqModels() {
 async function fetchOpenRouterModels() {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
+      headers: { Authorization: `Bearer ${OPENROUTER_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -75,7 +77,7 @@ async function fetchOpenRouterModels() {
 async function fetchOpenCodeModels() {
   try {
     const res = await fetch("https://opencode.ai/zen/v1/models", {
-      headers: { Authorization: `Bearer ${OPENCODE_KEY}` },
+      headers: { Authorization: `Bearer ${OPENCODE_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -96,7 +98,7 @@ async function fetchOpenCodeModels() {
 async function fetchOllamaModels() {
   try {
     const res = await fetch("https://ollama.com/api/tags", {
-      headers: { Authorization: `Bearer ${OLLAMA_KEY}` },
+      headers: { Authorization: `Bearer ${OLLAMA_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -118,7 +120,7 @@ async function fetchOllamaModels() {
 async function fetchCerebrasModels() {
   try {
     const res = await fetch("https://api.cerebras.ai/v1/models", {
-      headers: { Authorization: `Bearer ${CEREBRAS_KEY}` },
+      headers: { Authorization: `Bearer ${CEREBRAS_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -139,7 +141,7 @@ async function fetchCerebrasModels() {
 async function fetchRoutewayModels() {
   try {
     const res = await fetch("https://api.routeway.ai/v1/models", {
-      headers: { Authorization: `Bearer ${ROUTEWAY_KEY}` },
+      headers: { Authorization: `Bearer ${ROUTEWAY_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -160,7 +162,7 @@ async function fetchRoutewayModels() {
 async function fetchNagaModels() {
   try {
     const res = await fetch("https://api.naga.ac/v1/models", {
-      headers: { Authorization: `Bearer ${NAGA_KEY}` },
+      headers: { Authorization: `Bearer ${NAGA_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -181,7 +183,7 @@ async function fetchNagaModels() {
 async function fetchSambaNovaModels() {
   try {
     const res = await fetch("https://api.sambanova.ai/v1/models", {
-      headers: { Authorization: `Bearer ${SAMBANOVA_KEY}` },
+      headers: { Authorization: `Bearer ${SAMBANOVA_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -202,7 +204,7 @@ async function fetchSambaNovaModels() {
 async function fetchXiaomiModels() {
   try {
     const res = await fetch("https://api.xiaomimimo.com/v1/models", {
-      headers: { Authorization: `Bearer ${XIAOMI_KEY}` },
+      headers: { Authorization: `Bearer ${XIAOMI_KEY()}` },
     })
     if (!res.ok) return null
     const json = await res.json()
@@ -241,7 +243,7 @@ async function fetchPuterModels() {
 export async function GET() {
   const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
-  if (GROQ_KEY) {
+  if (GROQ_KEY()) {
     const groqModels = await fetchGroqModels()
     if (groqModels) {
       groups.push({
@@ -251,14 +253,14 @@ export async function GET() {
     }
   }
 
-  if (GOOGLE_KEY) {
+  if (GOOGLE_KEY()) {
     groups.push({
       label: "Google",
       models: GOOGLE_MODELS,
     })
   }
 
-  if (OPENROUTER_KEY) {
+  if (OPENROUTER_KEY()) {
     const orModels = await fetchOpenRouterModels()
     if (orModels) {
       groups.push({
@@ -268,7 +270,7 @@ export async function GET() {
     }
   }
 
-  if (OPENCODE_KEY) {
+  if (OPENCODE_KEY()) {
     const ocModels = await fetchOpenCodeModels()
     if (ocModels) {
       groups.push({
@@ -278,7 +280,7 @@ export async function GET() {
     }
   }
 
-  if (OLLAMA_KEY) {
+  if (OLLAMA_KEY()) {
     const olModels = await fetchOllamaModels()
     if (olModels) {
       groups.push({
@@ -288,7 +290,7 @@ export async function GET() {
     }
   }
 
-  if (XIAOMI_KEY) {
+  if (XIAOMI_KEY()) {
     const xmModels = await fetchXiaomiModels()
     if (xmModels) {
       groups.push({
@@ -298,7 +300,7 @@ export async function GET() {
     }
   }
 
-  if (CEREBRAS_KEY) {
+  if (CEREBRAS_KEY()) {
     const cbModels = await fetchCerebrasModels()
     if (cbModels) {
       groups.push({
@@ -308,7 +310,7 @@ export async function GET() {
     }
   }
 
-  if (ROUTEWAY_KEY) {
+  if (ROUTEWAY_KEY()) {
     const rwModels = await fetchRoutewayModels()
     if (rwModels) {
       groups.push({
@@ -318,7 +320,7 @@ export async function GET() {
     }
   }
 
-  if (NAGA_KEY) {
+  if (NAGA_KEY()) {
     const nagaModels = await fetchNagaModels()
     if (nagaModels) {
       groups.push({
@@ -328,7 +330,7 @@ export async function GET() {
     }
   }
 
-  if (SAMBANOVA_KEY) {
+  if (SAMBANOVA_KEY()) {
     const snModels = await fetchSambaNovaModels()
     if (snModels) {
       groups.push({
@@ -338,7 +340,7 @@ export async function GET() {
     }
   }
 
-  if (CLOUDFLARE_KEY) {
+  if (CLOUDFLARE_KEY()) {
     groups.push({
       label: "Cloudflare",
       models: CLOUDFLARE_MODELS,

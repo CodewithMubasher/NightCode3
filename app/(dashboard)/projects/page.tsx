@@ -127,6 +127,7 @@ export default function ProjectsPage() {
                   <button
                     onClick={(e) => e.preventDefault()}
                     className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/50 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover:opacity-100"
+                    aria-label="Project options"
                   >
                     <MoreHorizontal size={13} />
                   </button>
@@ -175,6 +176,7 @@ export default function ProjectsPage() {
                   <button
                     onClick={() => setOpen(false)}
                     className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Close dialog"
                   >
                     <X size={18} />
                   </button>

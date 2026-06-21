@@ -2,7 +2,7 @@
   {
     "name": "win_control_mcp",
     "type": "local",
-    "command": "python C:\\win-mcp\\win_control_mcp.py",
+    "command": "python F:\\win-mcp\\win_control_mcp.py",
     "args": [],
     "url": "",
     "environment": {},

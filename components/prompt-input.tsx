@@ -23,11 +23,17 @@ import {
   type AttachmentData,
 } from "@/components/ai-elements/attachments"
 import { useNightCodeStore } from "@/store/nightcode-store"
+import { toast } from "sonner"
 
 const MAX_INPUT = 1000
 
 let cachedModelGroups: ModelGroupData[] | null = null
 let cachedSkills: SkillInfo[] | null = null
+
+const SpeechRecognitionAPI: (new () => object) | undefined = typeof window !== "undefined"
+  ? ((window as unknown as Record<string, unknown>).SpeechRecognition as (new () => object) | undefined) ||
+    ((window as unknown as Record<string, unknown>).webkitSpeechRecognition as (new () => object) | undefined)
+  : undefined
 
 interface ModelEntry {
   id: string
@@ -69,9 +75,11 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
   const [skills, setSkills] = React.useState<SkillInfo[]>(cachedSkills ?? [])
   const [skillSearch, setSkillSearch] = React.useState<string | null>(null)
   const [skillCursor, setSkillCursor] = React.useState(0)
+  const [isListening, setIsListening] = React.useState(false)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const searchRef = React.useRef<HTMLInputElement>(null)
+  const recognitionRef = React.useRef<{ abort: () => void; start: () => void; stop: () => void; continuous: boolean; interimResults: boolean; lang: string; onresult: ((e: unknown) => void) | null; onerror: (() => void) | null; onend: (() => void) | null } | null>(null)
 
   React.useEffect(() => {
     if (!cachedSkills) {
@@ -81,13 +89,17 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       fetch("/api/models").then((r) => r.json()).then((groups: ModelGroupData[]) => {
         cachedModelGroups = groups
         setModelGroups(groups)
-        if (groups.length > 0) {
-          const initial = findModelEntry(groups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider) ?? groups[0].models[0]
-          setSelectedEntry(initial)
-        }
       }).catch(() => {})
     }
   }, [])
+
+  React.useEffect(() => {
+    const groups = cachedModelGroups ?? modelGroups
+    if (groups.length > 0) {
+      const entry = findModelEntry(groups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider) ?? groups[0].models[0]
+      setSelectedEntry(entry)
+    }
+  }, [defaultModel, defaultProvider, settings.defaultModel, settings.defaultProvider, modelGroups])
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -118,6 +130,40 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
   function removeAttachment(id: string) {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }
+
+  function toggleListening() {
+    if (!SpeechRecognitionAPI) {
+      toast.error("Speech recognition is not supported in this browser")
+      return
+    }
+    if (isListening) {
+      recognitionRef.current?.abort()
+      setIsListening(false)
+      return
+    }
+    const Ctor = SpeechRecognitionAPI as new () => NonNullable<typeof recognitionRef.current>
+    const recognition = new Ctor()
+    recognition.continuous = false
+    recognition.interimResults = true
+    recognition.lang = "en-US"
+    recognition.onresult = (e: unknown) => {
+      const results = (e as { results: { [index: number]: { [index: number]: { transcript: string } }; length: number } }).results
+      const transcript = Array.from({ length: results.length }, (_, i) => results[i][0].transcript).join("")
+      setValue((prev) => {
+        const next = prev + " " + transcript
+        return next.length > MAX_INPUT ? prev : next
+      })
+    }
+    recognition.onend = () => setIsListening(false)
+    recognition.onerror = () => setIsListening(false)
+    recognition.start()
+    recognitionRef.current = recognition
+    setIsListening(true)
+  }
+
+  React.useEffect(() => {
+    return () => recognitionRef.current?.abort()
+  }, [])
 
   function handleSubmit() {
     const trimmed = value.trim()
@@ -167,9 +213,17 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       }
       if (e.key === "Escape") { setSkillSearch(null); setSkillCursor(0); return }
     }
-    if (e.key === "Enter" && !e.shiftKey && !showSkillSuggestions) {
-      e.preventDefault()
-      handleSubmit()
+    if (e.key === "Enter" && !showSkillSuggestions) {
+      if (settings.enterToSend && !e.shiftKey) {
+        e.preventDefault()
+        handleSubmit()
+        return
+      }
+      if (!settings.enterToSend && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        handleSubmit()
+        return
+      }
     }
   }
 
@@ -240,6 +294,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                 <button
                   disabled={disabled}
                   className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  aria-label="Attach files"
                 >
                   <Plus size={14} />
                 </button>
@@ -344,15 +399,18 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
             </Popover>
 
             <button
+              onClick={toggleListening}
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label={isListening ? "Stop recording" : "Voice input"}
             >
-              <Mic size={14} />
+              <Mic size={14} style={isListening ? { color: "#ef4444", filter: "drop-shadow(0 0 4px #ef4444)" } : undefined} />
             </button>
             {(value.trim() || disabled) && (
               <button
                 onClick={disabled ? () => useNightCodeStore.getState().cancelStream() : handleSubmit}
                 className="flex size-7 items-center justify-center rounded-full text-white transition-all hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: "var(--primary-color)" }}
+                aria-label={disabled ? "Stop generation" : "Send message"}
               >
                 {disabled ? <StopCircle size={14} /> : <ArrowUp size={14} />}
               </button>

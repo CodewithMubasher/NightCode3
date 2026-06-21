@@ -125,6 +125,7 @@ export function QuestionsPanel({ data, onReject, onSubmit }: QuestionsPanelProps
                   display: "flex",
                   alignItems: "center",
                 }}
+                aria-label="Previous question"
               >
                 <ChevronLeft size={14} />
               </button>
@@ -153,6 +154,7 @@ export function QuestionsPanel({ data, onReject, onSubmit }: QuestionsPanelProps
                   display: "flex",
                   alignItems: "center",
                 }}
+                aria-label="Next question"
               >
                 <ChevronRight size={14} />
               </button>
@@ -170,6 +172,7 @@ export function QuestionsPanel({ data, onReject, onSubmit }: QuestionsPanelProps
                   display: "flex",
                   alignItems: "center",
                 }}
+                aria-label="Dismiss questions"
               >
                 <X size={14} />
               </button>

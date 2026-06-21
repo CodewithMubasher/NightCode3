@@ -1,11 +1,15 @@
 import * as fs from "fs"
 import * as path from "path"
 
-const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
+const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 function resolvePath(filePath: string): string {
-  if (path.isAbsolute(filePath)) return filePath
-  return path.resolve(WORKSPACE, filePath)
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE, filePath)
+  const normalized = path.normalize(resolved)
+  if (!normalized.startsWith(WORKSPACE)) {
+    throw new Error(`Path traversal denied: "${filePath}" is outside the workspace`)
+  }
+  return normalized
 }
 
 export const readFileTool = {

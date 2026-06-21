@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData, Project } from "@/types"
+import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData, Project, PendingConfirmation } from "@/types"
 import { toast } from "sonner"
 
 function generateId(): string {
@@ -23,6 +23,8 @@ interface NightCodeState {
   activeProjectId: string | null
   isStreaming: boolean
   askData: AskData | null
+  pendingConfirmation: PendingConfirmation | null
+  dismissConfirmation: () => void
   settings: AppSettings
 
   createChat: (model?: string, provider?: string, projectId?: string) => string
@@ -43,12 +45,16 @@ interface NightCodeState {
   upsertArtifact: (chatId: string, messageId: string, artifact: Artifact) => void
   deleteArtifact: (artifactId: string) => void
   renameChat: (id: string, title: string) => void
+  moveChatToProject: (chatId: string, projectId: string | null) => void
 
   rollbackToMessage: (chatId: string, messageId: string) => void
 
   sendMessage: (chatId: string, content: string, skills?: string[], attachments?: AttachmentData[], model?: string, provider?: string) => Promise<void>
   cancelStream: () => void
   setAskData: (data: AskData | null) => void
+  setPendingConfirmation: (data: PendingConfirmation | null) => void
+  confirmDeletion: (chatId: string) => Promise<void>
+  cancelDeletion: (chatId: string) => void
   submitAskAnswers: (chatId: string, answers: Record<string, unknown>) => Promise<void>
 
   setSettings: (settings: Partial<AppSettings>) => void
@@ -66,6 +72,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       activeProjectId: null,
       isStreaming: false,
       askData: null,
+      pendingConfirmation: null,
       settings: {
         theme: "dark",
         primaryColor: "#D97757",
@@ -75,6 +82,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         maxTokens: 4096,
         soundEnabled: false,
         enterToSend: true,
+        reducedMotion: false,
       },
 
       createChat: (model, provider, projectId) => {
@@ -135,16 +143,19 @@ export const useNightCodeStore = create<NightCodeState>()(
             c.id === chatId
               ? {
                   ...c,
-                  messages: c.messages.map((m) =>
-                    m.id === messageId ? { ...m, content: m.content + content } : m
-                  ),
+                  messages: c.messages.map((m) => {
+                    if (m.id === messageId) {
+                      const sanitized = (m.content + content).replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+                      return { ...m, content: sanitized }
+                    }
+                    return m
+                  }),
                   updatedAt: Date.now(),
                 }
               : c
           ),
         }))
       },
-
       updateToolState: (chatId, messageId, toolState) => {
         set((s) => ({
           chats: s.chats.map((c) =>
@@ -231,6 +242,15 @@ export const useNightCodeStore = create<NightCodeState>()(
           chats: s.chats.map((c) => (c.id === id ? { ...c, title, updatedAt: Date.now() } : c)),
         }))
       },
+      moveChatToProject: (chatId, projectId) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? { ...c, projectId: projectId ?? undefined }
+              : c
+          ),
+        }))
+      },
 
       createProject: async (name, description) => {
         const id = generateId()
@@ -291,20 +311,28 @@ export const useNightCodeStore = create<NightCodeState>()(
       sendMessage: async (chatId, content, skills, attachments, model, provider) => {
         const state = get()
         if (state.isStreaming) return
-        const chat = state.chats.find((c) => c.id === chatId)
-        if (!chat) return
+        set({ isStreaming: true })
+        const chat = get().chats.find((c) => c.id === chatId)
+        if (!chat) { set({ isStreaming: false }); return }
 
         const prevModel = chat.model
         if (model && prevModel && model !== prevModel) {
-          chat.messages.push({
+          const sysMsg = {
             id: generateId(),
-            role: "system",
+            role: "system" as const,
             content: `[System: Model switched from ${prevModel} to ${model}. Continue the conversation using the new model's capabilities and reasoning style. The previous analysis and context remain valid.]`,
             toolStates: {},
             artifacts: [],
-            status: "complete",
+            status: "complete" as const,
             hasError: false,
-          })
+          }
+          set((s) => ({
+            chats: s.chats.map((c) =>
+              c.id === chatId
+                ? { ...c, messages: [...c.messages, sysMsg] }
+                : c
+            ),
+          }))
         }
 
         abortController = new AbortController()
@@ -359,13 +387,12 @@ export const useNightCodeStore = create<NightCodeState>()(
                 }
               : c
           ),
-          isStreaming: true,
         }))
 
         try {
           const messagePayload = [...chat.messages, userMessage].map((m) => ({
             role: m.role,
-            content: m.content,
+            content: m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim(),
           }))
 
           const effectiveProvider = provider ?? chat.provider
@@ -502,6 +529,18 @@ export const useNightCodeStore = create<NightCodeState>()(
                     }
                     break
                   }
+                  case "confirmation": {
+                    const p = parsed.payload as Record<string, unknown> | undefined
+                    if (p?.path && p?.fileCount != null && p?.toolCallId) {
+                      get().setPendingConfirmation({
+                        path: p.path as string,
+                        fileCount: p.fileCount as number,
+                        toolCallId: p.toolCallId as string,
+                      })
+                      get().updateMessageStatus(chatId, assistantMessage.id, "complete")
+                    }
+                    break
+                  }
                   case "message_complete": {
                     get().updateMessageStatus(chatId, assistantMessage.id, "complete")
                     const completedMsg = get().chats.find((c) => c.id === chatId)
@@ -543,15 +582,18 @@ export const useNightCodeStore = create<NightCodeState>()(
             get().updateMessageStatus(chatId, assistantMessage.id, "error")
           }
         } finally {
-          const s = get()
-          const ch = s.chats.find((c) => c.id === chatId)
-          if (ch && model && model !== ch.model) {
-            ch.model = model
-          }
-          if (ch && provider && provider !== ch.provider) {
-            ch.provider = provider
-          }
-          set({ chats: [...s.chats], isStreaming: false })
+          set((s) => ({
+            chats: s.chats.map((c) =>
+              c.id === chatId
+                ? {
+                    ...c,
+                    ...(model && model !== c.model ? { model } : {}),
+                    ...(provider && provider !== c.provider ? { provider } : {}),
+                  }
+                : c
+            ),
+            isStreaming: false,
+          }))
           abortController = null
         }
       },
@@ -559,6 +601,71 @@ export const useNightCodeStore = create<NightCodeState>()(
       setSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
       setAskData: (data) => set({ askData: data }),
+      setPendingConfirmation: (data) => set({ pendingConfirmation: data }),
+      confirmDeletion: async (chatId) => {
+        const state = get()
+        if (!state.pendingConfirmation) return
+        const { path, toolCallId } = state.pendingConfirmation
+        const res = await fetch("/api/chat/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId, messageId: state.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.id, toolCallId, path }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Confirmation failed" }))
+          toast.error(err.error ?? "Confirmation failed")
+          set({ pendingConfirmation: null })
+          return
+        }
+        const data = await res.json()
+        // Update the tool state to show deletion succeeded
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    const existing = m.toolStates[toolCallId]
+                    if (!existing) return m
+                    return {
+                      ...m,
+                      toolStates: {
+                        ...m.toolStates,
+                        [toolCallId]: { ...existing, status: "verified" as ToolStatus, result: data.data },
+                      },
+                    }
+                  }),
+                }
+              : c
+          ),
+          pendingConfirmation: null,
+        }))
+      },
+      cancelDeletion: (chatId) => {
+        const state = get()
+        if (!state.pendingConfirmation) return
+        const { toolCallId, path } = state.pendingConfirmation
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (!m.toolStates[toolCallId]) return m
+                    const updated = { ...m.toolStates }
+                    delete updated[toolCallId]
+                    return { ...m, toolStates: updated }
+                  }),
+                }
+              : c
+          ),
+          pendingConfirmation: null,
+        }))
+        toast.info(`Deletion of "${path}" cancelled`)
+      },
+      dismissConfirmation: () => {
+        set({ pendingConfirmation: null })
+      },
       submitAskAnswers: async (chatId, answers) => {
         const state = get()
         if (!state.askData) return

@@ -164,13 +164,14 @@ export function TopHeader() {
             )}
           </ContextContent>
         </Context>
-        <Button variant="ghost" size="icon-sm" onClick={togglePanel}>
+        <Button variant="ghost" size="icon-sm" onClick={togglePanel} aria-label="Toggle artifact panel">
           <FileText size={16} />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          aria-label="Toggle theme"
         >
           <Sun className="hidden dark:block" size={16} />
           <Moon className="block dark:hidden" size={16} />

@@ -50,7 +50,7 @@ export function NodeConfig({ node, onUpdate, onClose }: NodeConfigProps) {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
         <h3 className="text-sm font-medium text-neutral-200">{d.label}</h3>
-        <button onClick={onClose} className="rounded p-0.5 text-neutral-500 hover:text-neutral-300">
+        <button onClick={onClose} className="rounded p-0.5 text-neutral-500 hover:text-neutral-300" aria-label="Close configuration">
           <X size={14} />
         </button>
       </div>

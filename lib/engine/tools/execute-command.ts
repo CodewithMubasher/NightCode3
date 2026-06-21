@@ -3,11 +3,15 @@ import { promisify } from "util"
 import * as path from "path"
 
 const execAsync = promisify(exec)
-const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
+const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 function resolvePath(dirPath: string): string {
-  if (path.isAbsolute(dirPath)) return dirPath
-  return path.resolve(WORKSPACE, dirPath)
+  const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
+  const normalized = path.normalize(resolved)
+  if (!normalized.startsWith(WORKSPACE)) {
+    throw new Error(`Path traversal denied: "${dirPath}" is outside the workspace`)
+  }
+  return normalized
 }
 
 export const executeCommandTool = {

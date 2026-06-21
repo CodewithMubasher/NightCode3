@@ -11,10 +11,13 @@ import {
 
 export interface CompactionSummary {
   goal: string
-  progress: string[]
-  blockers: string[]
-  files: string[]
-  next: string[]
+  constraints: string
+  inProgress: string
+  done: string
+  keyDecisions: string
+  nextStep: string
+  criticalContent: string
+  relevantFiles: string
 }
 
 function generateId(): string {
@@ -109,13 +112,16 @@ export class CompactionService {
 
     const prompt = `You are a session compactor. Analyze the following agent execution steps and produce a concise structured summary.
 
-Respond with ONLY valid JSON matching this schema:
+Respond with ONLY valid JSON matching this schema (use "(none)" for empty fields):
 {
   "goal": "What was the agent trying to achieve in these steps (one sentence)",
-  "progress": ["concrete accomplishment 1", "accomplishment 2"],
-  "blockers": ["any error or obstacle encountered"],
-  "files": ["path/to/file1", "path/to/file2"],
-  "next": ["what the agent planned to do next"]
+  "constraints": "Constraints, limitations, or preferences the agent was following",
+  "inProgress": "What is currently in progress or partially done",
+  "done": "What was completed in these steps",
+  "keyDecisions": "Important architectural or design decisions made",
+  "nextStep": "What the agent planned to do next",
+  "criticalContent": "Critical information, code snippets, or context the agent must remember",
+  "relevantFiles": "Paths to files that were created or modified"
 }
 
 Steps data:
@@ -135,10 +141,13 @@ ${JSON.stringify(stepData, null, 2)}`
     } catch {
       return {
         goal: "Agent execution steps",
-        progress: [`Completed ${stepData.length} steps`],
-        blockers: [],
-        files: [],
-        next: [],
+        constraints: "(none)",
+        inProgress: "(none)",
+        done: `Completed ${stepData.length} steps`,
+        keyDecisions: "(none)",
+        nextStep: "(none)",
+        criticalContent: "(none)",
+        relevantFiles: "(none)",
       }
     }
   }

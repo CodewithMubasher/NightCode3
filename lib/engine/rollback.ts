@@ -2,11 +2,15 @@ import * as fs from "fs"
 import * as path from "path"
 import { getSnapshotsBySession, deleteSessionCascade } from "@/lib/db/adapter"
 
-const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
+const WORKSPACE_ABS = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 function resolvePath(filePath: string): string {
-  if (path.isAbsolute(filePath)) return filePath
-  return path.resolve(WORKSPACE, filePath)
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE_ABS, filePath)
+  const normalized = path.normalize(resolved)
+  if (!normalized.startsWith(WORKSPACE_ABS)) {
+    throw new Error(`Path traversal denied: "${filePath}" is outside the workspace`)
+  }
+  return normalized
 }
 
 export async function rollbackMessage(messageId: string): Promise<void> {
@@ -19,6 +23,9 @@ export async function rollbackMessage(messageId: string): Promise<void> {
       if (snap.existed_before && snap.original_content !== null) {
         fs.mkdirSync(path.dirname(resolved), { recursive: true })
         fs.writeFileSync(resolved, snap.original_content, "utf-8")
+      } else if (snap.existed_before && snap.original_content === null) {
+        // write_file on existing file — content not stored (bloat optimization).
+        // Leave the file as-is; cannot restore exact pre-edit state.
       } else {
         try {
           fs.rmSync(resolved, { recursive: true, force: true })

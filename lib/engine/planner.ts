@@ -4,110 +4,98 @@ import { createGroq } from "@ai-sdk/groq"
 import { z } from "zod"
 import type { AIProvider } from "@/types"
 import type { ToolImplementation } from "./tools"
+import { getApiKey } from "@/lib/keys"
 
-// ─── Providers ────────────────────────────────────────────────────────────────
+// ─── Lazy provider factory ────────────────────────────────────────────────────
 
-const openrouter = createOpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-})
-
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
-const groq = createGroq({
-  apiKey: process.env.GROQ_API_KEY,
-})
-
-const opencode = createOpenAI({
-  baseURL: "https://opencode.ai/zen/v1",
-  apiKey: process.env.OPENCODE_API_KEY || "",
-})
-
-const xiaomi = createOpenAI({
-  baseURL: "https://api.xiaomimimo.com/v1",
-  apiKey: process.env.XIAOMI_API_KEY || "",
-})
-
-const cerebras = createOpenAI({
-  baseURL: "https://api.cerebras.ai/v1",
-  apiKey: process.env.CEREBRAS_API_KEY || "",
-})
-
-const routeway = createOpenAI({
-  baseURL: "https://api.routeway.ai/v1",
-  apiKey: process.env.ROUTEWAY_API_KEY || "",
-})
-
-const naga = createOpenAI({
-  baseURL: "https://api.naga.ac/v1",
-  apiKey: process.env.NAGA_API_KEY || "",
-})
-
-const sambanova = createOpenAI({
-  baseURL: "https://api.sambanova.ai/v1",
-  apiKey: process.env.SAMBANOVA_API_KEY || "",
-})
-
-const cloudflare = createOpenAI({
-  baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
-  apiKey: process.env.CLOUDFLARE_API_TOKEN || "",
-  fetch: async (url, options) => {
-    const response = await fetch(url, options)
-    if (!url.toString().includes("/chat/completions") || !response.body) {
-      return response
-    }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    const encoder = new TextEncoder()
-    const customStream = new ReadableStream({
-      async start(controller) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          let chunk = decoder.decode(value, { stream: true })
-          chunk = chunk.replace(/"content":\s*true/g, '"content":""')
-          controller.enqueue(encoder.encode(chunk))
-        }
-        controller.close()
-      },
-    })
-    return new Response(customStream, {
-      headers: response.headers,
-      status: response.status,
-      statusText: response.statusText,
-    })
-  },
-})
+function makeOpenRouter() {
+  return createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: getApiKey("OPENROUTER_API_KEY") })
+}
+function makeOpenAI() {
+  return createOpenAI({ apiKey: getApiKey("OPENAI_API_KEY") })
+}
+function makeGroq() {
+  return createGroq({ apiKey: getApiKey("GROQ_API_KEY") })
+}
+function makeOpenCode() {
+  return createOpenAI({ baseURL: "https://opencode.ai/zen/v1", apiKey: getApiKey("OPENCODE_API_KEY") })
+}
+function makeXiaomi() {
+  return createOpenAI({ baseURL: "https://api.xiaomimimo.com/v1", apiKey: getApiKey("XIAOMI_API_KEY") })
+}
+function makeCerebras() {
+  return createOpenAI({ baseURL: "https://api.cerebras.ai/v1", apiKey: getApiKey("CEREBRAS_API_KEY") })
+}
+function makeRouteway() {
+  return createOpenAI({ baseURL: "https://api.routeway.ai/v1", apiKey: getApiKey("ROUTEWAY_API_KEY") })
+}
+function makeNaga() {
+  return createOpenAI({ baseURL: "https://api.naga.ac/v1", apiKey: getApiKey("NAGA_API_KEY") })
+}
+function makeSambaNova() {
+  return createOpenAI({ baseURL: "https://api.sambanova.ai/v1", apiKey: getApiKey("SAMBANOVA_API_KEY") })
+}
+function makeCloudflare() {
+  const key = getApiKey("CLOUDFLARE_API_TOKEN")
+  return createOpenAI({
+    baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
+    apiKey: key,
+    fetch: async (url, options) => {
+      const response = await fetch(url, options)
+      if (!url.toString().includes("/chat/completions") || !response.body) {
+        return response
+      }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      const encoder = new TextEncoder()
+      const customStream = new ReadableStream({
+        async start(controller) {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            let chunk = decoder.decode(value, { stream: true })
+            chunk = chunk.replace(/"content":\s*true/g, '"content":""')
+            controller.enqueue(encoder.encode(chunk))
+          }
+          controller.close()
+        },
+      })
+      return new Response(customStream, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText,
+      })
+    },
+  })
+}
 
 export function getLanguageModel(provider: AIProvider, modelId: string) {
   switch (provider) {
     case "openai":
-      return openai.languageModel(modelId)
+      return makeOpenAI().languageModel(modelId)
     case "openrouter":
-      return openrouter.chat(modelId)
+      return makeOpenRouter().chat(modelId)
     case "groq":
-      return groq.languageModel(modelId)
+      return makeGroq().languageModel(modelId)
     case "google": {
       const { createGoogleGenerativeAI } = require("@ai-sdk/google")
-      const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY })
+      const google = createGoogleGenerativeAI({ apiKey: getApiKey("GOOGLE_GENERATIVE_AI_API_KEY") })
       return google.languageModel(modelId)
     }
     case "opencode":
-      return opencode.chat(modelId)
+      return makeOpenCode().chat(modelId)
     case "xiaomi":
-      return xiaomi.chat(modelId)
+      return makeXiaomi().chat(modelId)
     case "cerebras":
-      return cerebras.chat(modelId)
+      return makeCerebras().chat(modelId)
     case "routeway":
-      return routeway.chat(modelId)
+      return makeRouteway().chat(modelId)
     case "naga":
-      return naga.chat(modelId)
+      return makeNaga().chat(modelId)
     case "sambanova":
-      return sambanova.chat(modelId)
+      return makeSambaNova().chat(modelId)
     case "cloudflare":
-      return cloudflare.chat(modelId)
+      return makeCloudflare().chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }
@@ -157,7 +145,6 @@ export type StepResult =
 
 export type PlannerCallbacks = {
   onText?: (text: string) => void
-  onReasoning?: (text: string) => void
 }
 
 // ─── Single-step planner ───────────────────────────────────────────────────────
@@ -182,7 +169,7 @@ export async function planStep(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OLLAMA_CLOUD_API_KEY}`,
+          Authorization: `Bearer ${getApiKey("OLLAMA_CLOUD_API_KEY")}`,
         },
         body: JSON.stringify({
           model: modelId,
@@ -291,8 +278,6 @@ export async function planStep(
       if (chunk.type === "text-delta") {
         collectedText += chunk.text
         collectedText = collectedText.replace(/```json[\s\S]*?```/g, "").trim()
-      } else if (chunk.type === "reasoning-delta") {
-        if (callbacks.onReasoning) callbacks.onReasoning(chunk.text)
       } else if (chunk.type === "tool-call") {
         collectedToolCalls.push({
           toolCallId: chunk.toolCallId,
@@ -334,9 +319,18 @@ export async function planStep(
     console.error(`[planner] Tool calling failed: ${msg}. Retrying without tools.`)
 
     // Fallback: text-only request with retry
+    // Strip tool-call/tool-result messages since no tools are registered
+    const textOnlyMessages = messages.filter((m) => m.role !== "tool").map((m) => {
+      if (m.role === "assistant" && Array.isArray(m.content)) {
+        const textParts = (m.content as Array<{ type: string; text?: string }>).filter((p) => p.type === "text")
+        const combined = textParts.map((p) => p.text ?? "").join("")
+        return { role: "assistant", content: combined }
+      }
+      return m
+    })
     try {
       const fallbackResult = await retryWithBackoff(
-        () => doStreamText(messages, undefined),
+        () => doStreamText(textOnlyMessages, undefined),
         { signal }
       )
       return { type: "text", content: fallbackResult.text, usage: fallbackResult.usage }

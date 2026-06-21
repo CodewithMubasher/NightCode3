@@ -1,8 +1,13 @@
 import type { Artifact } from "@/types"
 
 const artifacts = new Map<string, Artifact>()
+const MAX_ARTIFACTS = 200
 
 export function addArtifact(artifact: Artifact): void {
+  if (artifacts.size >= MAX_ARTIFACTS) {
+    const oldest = artifacts.keys().next().value
+    if (oldest) artifacts.delete(oldest)
+  }
   artifacts.set(artifact.id, artifact)
 }
 
@@ -23,4 +28,8 @@ export function updateArtifact(id: string, updates: Partial<Pick<Artifact, "titl
 
 export function deleteArtifact(id: string): boolean {
   return artifacts.delete(id)
+}
+
+export function clearArtifacts(): void {
+  artifacts.clear()
 }

@@ -2,10 +2,14 @@ import { NextResponse } from "next/server"
 import { loadMCPConfigs, addMCPConfig, removeMCPConfig, toggleMCPConfig, type MCPConfig } from "@/lib/mcp/storage"
 import { connectMCP, disconnectMCP, getAllConnectionStatuses } from "@/lib/mcp/manager"
 
+function stripEnv(configs: MCPConfig[]): (Omit<MCPConfig, "environment"> & { environment?: never })[] {
+  return configs.map(({ environment: _, ...rest }) => rest)
+}
+
 export async function GET() {
   const configs = loadMCPConfigs()
   const statuses = getAllConnectionStatuses(configs)
-  return NextResponse.json({ configs, statuses })
+  return NextResponse.json({ configs: stripEnv(configs), statuses })
 }
 
 export async function POST(req: Request) {
@@ -16,7 +20,7 @@ export async function POST(req: Request) {
     if (action === "delete") {
       await disconnectMCP(name)
       const configs = removeMCPConfig(name)
-      return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs) })
+      return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs) })
     }
 
     if (action === "toggle") {
@@ -25,13 +29,13 @@ export async function POST(req: Request) {
       if (updated?.enabled) {
         try {
           const tools = await connectMCP(updated)
-          return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs), tools })
+          return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs), tools })
         } catch (err) {
-          return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs), error: (err as Error).message })
+          return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs), error: (err as Error).message })
         }
       } else {
         await disconnectMCP(name)
-        return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs) })
+        return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs) })
       }
     }
 
@@ -66,13 +70,13 @@ export async function POST(req: Request) {
     if (config.enabled) {
       try {
         const tools = await connectMCP(config)
-        return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs), tools })
+        return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs), tools })
       } catch (err) {
-        return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs), error: (err as Error).message })
+        return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs), error: (err as Error).message })
       }
     }
 
-    return NextResponse.json({ configs, statuses: getAllConnectionStatuses(configs) })
+    return NextResponse.json({ configs: stripEnv(configs), statuses: getAllConnectionStatuses(configs) })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

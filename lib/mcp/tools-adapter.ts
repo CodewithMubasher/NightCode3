@@ -20,7 +20,7 @@ export async function listAllMCPTools(): Promise<{ name: string; description: st
       const result = await conn.client.listTools()
       for (const tool of result.tools ?? []) {
         allTools.push({
-          name: `${conn.config.name}_${tool.name}`,
+          name: `${conn.config.name.trim()}_${tool.name.trim()}`,
           description: tool.description ?? `${conn.config.name} MCP tool`,
           inputSchema: tool.inputSchema,
         })
@@ -51,7 +51,7 @@ export async function createMCPToolImplementations(): Promise<ToolImplementation
     try {
       const result = await conn.client.listTools()
       for (const mcpTool of result.tools ?? []) {
-        const toolName = `${conn.config.name}_${mcpTool.name}`
+        const toolName = `${conn.config.name.trim()}_${mcpTool.name.trim()}`
         const schema: Record<string, string> = {}
         if (mcpTool.inputSchema?.properties) {
           for (const [key, val] of Object.entries(mcpTool.inputSchema.properties)) {

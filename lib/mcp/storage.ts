@@ -17,7 +17,12 @@ export function loadMCPConfigs(): MCPConfig[] {
   try {
     if (!fs.existsSync(CONFIG_PATH)) return []
     const raw = fs.readFileSync(CONFIG_PATH, "utf-8")
-    return JSON.parse(raw)
+    const configs: MCPConfig[] = JSON.parse(raw)
+    for (const c of configs) {
+      c.name = c.name.trim()
+      c.command = c.command?.trim()
+    }
+    return configs
   } catch {
     return []
   }

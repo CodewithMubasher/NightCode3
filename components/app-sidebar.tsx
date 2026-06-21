@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
+  Minus,
   ArrowRightFromLine,
   Blocks,
   Folder,
@@ -43,9 +44,14 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuPortal,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
@@ -158,11 +164,12 @@ export function AppSidebar() {
                           <button
                             onClick={(e) => e.stopPropagation()}
                             className="absolute right-1 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100"
+                            aria-label="Chat options"
                           >
                             <MoreHorizontal size={14} />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent side="right" align="start" className="w-40">
+                          <DropdownMenuContent side="right" align="start" className="w-48">
                           <DropdownMenuItem
                             onClick={() => {
                               const title = prompt("Rename chat:", chat.title)
@@ -182,21 +189,62 @@ export function AppSidebar() {
                             <Trash2 size={14} />
                             <span>Delete</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem disabled>
-                            <ArrowRightFromLine size={14} />
-                            <span>Move</span>
-                          </DropdownMenuItem>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className="whitespace-nowrap">
+                              <ArrowRightFromLine size={14} />
+                              <span>Move to project</span>
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuPortal>
+                              <DropdownMenuSubContent>
+                                {projects.map((p) => (
+                                  <DropdownMenuItem
+                                    key={p.id}
+                                    onClick={() => useNightCodeStore.getState().moveChatToProject(chat.id, p.id)}
+                                  >
+                                    <Folder size={14} />
+                                    <span>{p.name}</span>
+                                  </DropdownMenuItem>
+                                ))}
+                                {projects.length === 0 && (
+                                  <DropdownMenuItem disabled>
+                                    <span>No projects yet</span>
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => useNightCodeStore.getState().moveChatToProject(chat.id, null)}
+                                >
+                                  <Minus size={14} />
+                                  <span>Remove from project</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => router.push("/projects")}
+                                >
+                                  <Plus size={14} />
+                                  <span>New project</span>
+                                </DropdownMenuItem>
+                              </DropdownMenuSubContent>
+                            </DropdownMenuPortal>
+                          </DropdownMenuSub>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
                   </SidebarMenuItem>
                 )
               })}
-              {recentChats.length === 0 && (
+              {!hydrated ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <SidebarMenuItem key={i}>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <Skeleton className="h-4 flex-1 rounded" />
+                    </div>
+                  </SidebarMenuItem>
+                ))
+              ) : recentChats.length === 0 ? (
                 <SidebarMenuItem>
                   <span className="px-2 text-xs text-muted-foreground">No chats yet</span>
                 </SidebarMenuItem>
-              )}
+              ) : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -212,7 +260,7 @@ export function AppSidebar() {
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+              <button className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" aria-label="User menu">
                 <EllipsisVertical size={16} className="shrink-0" />
               </button>
             </DropdownMenuTrigger>

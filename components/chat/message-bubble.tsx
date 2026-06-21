@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react"
 import type { Message, ToolState } from "@/types"
 import {
-  Copy, Check, ThumbsUp, ThumbsDown, MoreHorizontal, Eclipse, RotateCcw,
+  Copy, Check, ThumbsUp, ThumbsDown, Eclipse, RotateCcw,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
   FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot,
 } from "lucide-react"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ai-elements/attachments"
 import { renderInlineMarkdown } from "@/lib/render-markdown"
 import { useNightCodeStore } from "@/store/nightcode-store"
+import { toast } from "sonner"
 
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)/)
@@ -338,6 +339,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes thinking-shimmer {
+          0%, 100% { background-position: 200% center; }
+          50% { background-position: 0% center; }
+        }
       `}</style>
       <div className="flex items-start gap-3">
         <div className="flex shrink-0 items-center justify-center pt-1.5">
@@ -358,6 +363,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 }}
               />
             </button>
+          )}
+          {message.status === "streaming" && toolCount === 0 && !message.content && (
+            <div className="flex items-center gap-1.5 py-1">
+              <span
+                className="text-sm font-sans"
+                style={{
+                  background: "linear-gradient(90deg, #666, #999, #666)",
+                  backgroundSize: "200% 100%",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  animation: "thinking-shimmer 2.5s ease-in-out infinite",
+                }}
+              >
+                Thinking
+              </span>
+            </div>
           )}
 
           <div
@@ -389,21 +410,29 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <button
                 onClick={handleCopy}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title="Copy message"
+                aria-label="Copy message"
               >
                 {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
               </button>
-              <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <button
+                onClick={() => toast.success("Thanks for the feedback!")}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Good response"
+              >
                 <ThumbsUp size={14} />
               </button>
-              <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              <button
+                onClick={() => toast.success("Thanks for the feedback!")}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Bad response"
+              >
                 <ThumbsDown size={14} />
               </button>
               <button
                 onClick={handleRollback}
                 disabled={rollingBack}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                title="Rollback to this point"
+                aria-label="Rollback to this point"
               >
                 <RotateCcw
                   size={14}
@@ -412,9 +441,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   style={!rollingBack && spinKey > 0 ? { animation: "spin-once 0.4s ease-out", animationFillMode: "forwards" } : undefined}
                 />
               </button>
-              <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                <MoreHorizontal size={14} />
-              </button>
+              
             </div>
           )}
         </div>

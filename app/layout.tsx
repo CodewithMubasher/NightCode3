@@ -22,6 +22,11 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning className="dark antialiased">
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `!function(){try{var s=JSON.parse(localStorage.getItem("nightcode-store")||"{}");var st=s&&s.state&&s.state.settings;if(st){if(st.primaryColor){document.documentElement.style.setProperty("--primary-color",st.primaryColor);document.documentElement.style.setProperty("--primary",st.primaryColor)}if(st.reducedMotion){document.documentElement.classList.add("reduce-motion")}}}catch(e){}}()`
+        }} />
+      </head>
       <body suppressHydrationWarning>
         <ThemeProvider>
           <SettingsApplier />

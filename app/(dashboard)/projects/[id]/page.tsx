@@ -82,6 +82,7 @@ export default function ProjectDetailPage() {
               <Link
                 href="/projects"
                 className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Back to projects"
               >
                 <ArrowLeft size={16} />
               </Link>
@@ -96,7 +97,7 @@ export default function ProjectDetailPage() {
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <button className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Project menu">
                     <MoreHorizontal size={16} />
                   </button>
                 </DropdownMenuTrigger>

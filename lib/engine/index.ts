@@ -8,6 +8,7 @@ import { planStep, type UsageInfo } from "./planner"
 import { flushBatch } from "@/lib/db/batch"
 import { executeTool } from "./executor"
 import { verifyToolResult } from "./verifier"
+import type { VerificationResult } from "./tools"
 import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
 import { CompactionService } from "./compaction-service"
@@ -18,7 +19,23 @@ function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-const WORKSPACE = process.env.BUILD_WORKSPACE || process.cwd()
+function countFilesRecursive(dir: string): number {
+  let count = 0
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        count += countFilesRecursive(fullPath)
+      } else {
+        count++
+      }
+    }
+  } catch {}
+  return count
+}
+
+const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 export interface EngineRunOptions {
   depth?: number
@@ -45,12 +62,18 @@ export class NightCodeEngine {
     const rawPath = args.path as string | undefined
     if (!rawPath) return
 
-    const resolved = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKSPACE, rawPath)
+    const candidate = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKSPACE, rawPath)
+    const resolved = path.normalize(candidate)
+    if (!resolved.startsWith(WORKSPACE)) {
+      throw new Error(`Path traversal denied: "${rawPath}" is outside the workspace`)
+    }
     let originalContent: string | null = null
     let existedBefore = 1
 
     try {
-      if (toolName === "write_file" || toolName === "delete_file") {
+      if (toolName === "write_file") {
+        existedBefore = fs.existsSync(resolved) ? 1 : 0
+      } else if (toolName === "delete_file") {
         if (fs.existsSync(resolved)) {
           originalContent = fs.readFileSync(resolved, "utf-8")
         } else {
@@ -132,7 +155,10 @@ export class NightCodeEngine {
     //   3. If model returns tool calls → execute each, verify, persist to DB
     //   4. Build tool result messages, rebuild context, loop
 
-    let currentMessages: Array<{ role: string; content: unknown }> = initialMessages.map((m) => ({ role: m.role, content: m.content }))
+    let currentMessages: Array<{ role: string; content: unknown }> = initialMessages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim() : m.content,
+    }))
     let stepNumber = 0
     const MAX_STEPS = config.maxIterations
     let toolCallCount = 0
@@ -159,9 +185,6 @@ export class NightCodeEngine {
           {
             onText: (text) => {
               this.emitEvent("text_delta", { text })
-            },
-            onReasoning: (text) => {
-              this.emitEvent("reasoning_delta", { text })
             },
           },
           signal,
@@ -229,7 +252,7 @@ export class NightCodeEngine {
           const generatedId = toolIsolation?.onToolStart(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
           let args = tc.args
           if (resolvedName === "delegate_task") {
-            args = { ...args, __provider: provider, __model: model, __depth: options?.depth ?? 0 }
+            args = { ...args, __provider: provider, __model: model, __depth: options?.depth ?? 0, __abortSignal: signal }
           }
           return { ...tc, toolDef, generatedId, args, resolvedName }
         })
@@ -273,6 +296,26 @@ export class NightCodeEngine {
               return { tc, skipResult: true } as const
             }
 
+            if (tc.resolvedName === "delete_file") {
+              asked = true
+              let fileCount = 0
+              try {
+                const rawPath = tc.args.path as string
+                const candidate = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKSPACE, rawPath)
+                const resolved = path.normalize(candidate)
+                if (resolved.startsWith(WORKSPACE) && fs.existsSync(resolved)) {
+                  const stat = fs.statSync(resolved)
+                  if (stat.isDirectory()) {
+                    fileCount = countFilesRecursive(resolved)
+                  } else {
+                    fileCount = 1
+                  }
+                }
+              } catch {}
+              this.emitEvent("confirmation", { path: tc.args.path, fileCount, toolCallId: tc.generatedId })
+              return { tc, skipResult: true } as const
+            }
+
             if (consecutiveErrors >= 2 && tc.toolDef!.name !== "think") {
               const forcedThink = {
                 success: true,
@@ -283,7 +326,7 @@ export class NightCodeEngine {
               return { tc, skipResult: false, success: true, data: forcedThink.data, forcedThink: true } as const
             }
 
-            if (!options?.silent && ["write_file", "delete_file", "create_folder"].includes(tc.resolvedName)) {
+            if (!options?.silent && ["write_file", "create_folder"].includes(tc.resolvedName)) {
               await this.takeFileSnapshot(tc.resolvedName, tc.args, tc.generatedId, messageId)
             }
             const execResult = await executeTool(tc.toolDef!, tc.args)
@@ -338,7 +381,12 @@ export class NightCodeEngine {
             continue
           }
 
-          const verification = await verifyToolResult(tc.toolDef!, tc.args, { success: true, data: result.data })
+          let verification: VerificationResult
+          try {
+            verification = await verifyToolResult(tc.toolDef!, tc.args, { success: true, data: result.data })
+          } catch (err) {
+            verification = { verified: false, discrepancy: `Verification threw: ${err instanceof Error ? err.message : "Unknown error"}` }
+          }
 
           if (verification.verified) {
             if (tc.toolName === "create_artifact") {
@@ -417,11 +465,12 @@ export class NightCodeEngine {
           consecutiveErrors = 0
         }
 
-        // ── 4. If model asked questions, pause conversation ────────────────
-        if (asked) break
-
         // ── 5. Trigger compaction if enough steps have passed ──────────────
         compactionService?.onStepComplete(stepNumber, provider, model)
+
+        // ── 4. If model asked questions, pause conversation ────────────────
+        flushBatch()
+        if (asked) break
 
         // ── 6. Rebuild context for next iteration ───────────────────────────
         // Structure feeds back to the model:
@@ -429,7 +478,7 @@ export class NightCodeEngine {
         //   + tool result messages (from execution)
         const assistantContent: Array<{ type: string; text?: string; toolCallId?: string; toolName?: string; input?: unknown }> = []
         if (step.text) {
-          assistantContent.push({ type: "text", text: step.text })
+          assistantContent.push({ type: "text", text: step.text.replace(/<think>[\s\S]*?<\/think>/g, "").trim() })
         }
         for (const tc of step.toolCalls) {
           assistantContent.push({

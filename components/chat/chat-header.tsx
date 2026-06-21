@@ -41,7 +41,7 @@ export function ChatHeader({ chatId }: ChatHeaderProps) {
     <header className="sticky top-0 z-10 flex h-12 items-center justify-end border-b border-border/50 bg-background/80 px-4 backdrop-blur-sm">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <button className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Chat menu">
               <MoreHorizontal size={16} />
             </button>
           </DropdownMenuTrigger>

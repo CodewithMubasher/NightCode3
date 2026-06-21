@@ -48,9 +48,13 @@ Examples:
 
     const files = Array.isArray(rawFiles) ? rawFiles : rawFiles.split(",").map((f: string) => f.trim()).filter(Boolean)
 
+    const parentSignal = args.__abortSignal as AbortSignal | undefined
     const { NightCodeEngine } = await import("@/lib/engine")
     const subEngine = new NightCodeEngine()
     const subSignal = new AbortController()
+    if (parentSignal) {
+      parentSignal.addEventListener("abort", () => subSignal.abort(), { once: true })
+    }
     let capturedText = ""
     let capturedToolCalls: Array<{ tool: string; args: Record<string, unknown> }> = []
 

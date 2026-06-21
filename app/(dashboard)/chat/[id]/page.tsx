@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import { QuestionsPanel } from "@/components/chat/questions-panel"
+import { ConfirmationPanel } from "@/components/chat/confirmation-panel"
 import { PromptInput } from "@/components/prompt-input"
 import type { AttachmentData } from "@/types"
 
@@ -16,7 +17,11 @@ export default function ChatPage() {
   const sendMessage = useNightCodeStore((s) => s.sendMessage)
   const isStreaming = useNightCodeStore((s) => s.isStreaming)
   const askData = useNightCodeStore((s) => s.askData)
+  const pendingConfirmation = useNightCodeStore((s) => s.pendingConfirmation)
   const submitAskAnswers = useNightCodeStore((s) => s.submitAskAnswers)
+  const confirmDeletion = useNightCodeStore((s) => s.confirmDeletion)
+  const cancelDeletion = useNightCodeStore((s) => s.cancelDeletion)
+  const dismissConfirmation = useNightCodeStore((s) => s.dismissConfirmation)
   const scrollRef = useRef<HTMLDivElement>(null)
   const userScrolled = useRef(false)
 
@@ -65,6 +70,18 @@ export default function ChatPage() {
     submitAskAnswers(id, {})
   }
 
+  function handleConfirmDeletion() {
+    confirmDeletion(id)
+  }
+
+  function handleCancelDeletion() {
+    cancelDeletion(id)
+  }
+
+  function handleDismissConfirmation() {
+    dismissConfirmation()
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div ref={scrollRef} className="flex-1 overflow-y-auto hide-scrollbar">
@@ -87,10 +104,18 @@ export default function ChatPage() {
             onReject={handleAskReject}
           />
         )}
+        {pendingConfirmation && (
+          <ConfirmationPanel
+            data={pendingConfirmation}
+            onConfirm={handleConfirmDeletion}
+            onCancel={handleCancelDeletion}
+            onDismiss={handleDismissConfirmation}
+          />
+        )}
         <div className="mx-auto max-w-3xl">
           <PromptInput
             onSubmit={handleSubmit}
-            disabled={isStreaming || !!askData}
+            disabled={isStreaming || !!askData || !!pendingConfirmation}
             defaultModel={chat.model}
             defaultProvider={chat.provider}
           />
