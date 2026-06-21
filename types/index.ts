@@ -54,7 +54,7 @@ export interface Chat {
   projectId?: string
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare"
 
 export type View = "chat" | "settings" | "projects"
 

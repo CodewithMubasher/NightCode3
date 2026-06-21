@@ -22,7 +22,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning className="dark antialiased">
-      <body>
+      <body suppressHydrationWarning>
         <ThemeProvider>
           <SettingsApplier />
           {children}

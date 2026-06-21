@@ -50,6 +50,37 @@ const sambanova = createOpenAI({
   apiKey: process.env.SAMBANOVA_API_KEY || "",
 })
 
+const cloudflare = createOpenAI({
+  baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
+  apiKey: process.env.CLOUDFLARE_API_TOKEN || "",
+  fetch: async (url, options) => {
+    const response = await fetch(url, options)
+    if (!url.toString().includes("/chat/completions") || !response.body) {
+      return response
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const encoder = new TextEncoder()
+    const customStream = new ReadableStream({
+      async start(controller) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          let chunk = decoder.decode(value, { stream: true })
+          chunk = chunk.replace(/"content":\s*true/g, '"content":""')
+          controller.enqueue(encoder.encode(chunk))
+        }
+        controller.close()
+      },
+    })
+    return new Response(customStream, {
+      headers: response.headers,
+      status: response.status,
+      statusText: response.statusText,
+    })
+  },
+})
+
 export function getLanguageModel(provider: AIProvider, modelId: string) {
   switch (provider) {
     case "openai":
@@ -75,6 +106,8 @@ export function getLanguageModel(provider: AIProvider, modelId: string) {
       return naga.chat(modelId)
     case "sambanova":
       return sambanova.chat(modelId)
+    case "cloudflare":
+      return cloudflare.chat(modelId)
     default:
       throw new Error(`Unsupported provider: ${provider}`)
   }
@@ -186,6 +219,8 @@ export async function planStep(
     }
   }
 
+  const sanitizeText = makeTextSanitizer()
+
   const model = getLanguageModel(provider, modelId)
   console.log(`[planner] planStep with ${availableTools.length} tools:`, availableTools.map((t) => t.name))
 
@@ -243,7 +278,8 @@ export async function planStep(
       abortSignal: signal,
       onChunk: ({ chunk }) => {
         if (chunk.type === "text-delta" && callbacks.onText) {
-          callbacks.onText(chunk.text)
+          const safe = sanitizeText(chunk.text)
+          if (safe) callbacks.onText(safe)
         }
       },
     })
@@ -254,6 +290,7 @@ export async function planStep(
     for await (const chunk of result.fullStream) {
       if (chunk.type === "text-delta") {
         collectedText += chunk.text
+        collectedText = collectedText.replace(/```json[\s\S]*?```/g, "").trim()
       } else if (chunk.type === "reasoning-delta") {
         if (callbacks.onReasoning) callbacks.onReasoning(chunk.text)
       } else if (chunk.type === "tool-call") {
@@ -308,5 +345,38 @@ export async function planStep(
       console.error(`[planner] Fallback also failed: ${fallbackMsg}`)
       return { type: "text", content: `LLM request failed: ${fallbackMsg}` }
     }
+  }
+}
+
+function makeTextSanitizer() {
+  let buffer = ""
+  let insideJsonBlock = false
+
+  return function sanitize(chunk: string): string {
+    buffer += chunk
+
+    if (!insideJsonBlock && buffer.includes("```json")) {
+      insideJsonBlock = true
+    }
+
+    if (insideJsonBlock) {
+      if (buffer.includes("```json") && buffer.includes("```")) {
+        const lastClose = buffer.lastIndexOf("```")
+        const firstOpen = buffer.indexOf("```json")
+        if (lastClose > firstOpen) {
+          buffer = buffer.slice(0, firstOpen) + buffer.slice(lastClose + 3)
+          insideJsonBlock = false
+        }
+      }
+      const clean = buffer
+        .replace(/```json[\s\S]*?```/g, "")
+        .trim()
+      buffer = clean
+      return ""
+    }
+
+    const cleaned = buffer
+    buffer = ""
+    return cleaned
   }
 }

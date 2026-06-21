@@ -3,7 +3,7 @@ import type { AskQuestion } from "@/types"
 
 export const askTool = {
   name: "ask",
-  description: `Ask the user a series of clarifying questions before building. For complex or ambiguous requests, gather requirements first. Each question should have multiple-choice options. Do NOT build anything until all questions are answered.
+  description: `Ask the user a series of clarifying questions before building. For complex or ambiguous requests, gather requirements first. Each question should have multiple-choice options (maximum 4 per question, keep them short and simple). Do NOT build anything until all questions are answered.
 
 Output a JSON array of question objects in the "questions" parameter. Each question has id, question text, and options array. Options have label and value fields.
 

@@ -182,7 +182,7 @@ export function QuestionsPanel({ data, onReject, onSubmit }: QuestionsPanelProps
           {/* Options list */}
           {current && (
             <div key={current.id}>
-              {current.options.map((opt, idx) => {
+              {(current.options ?? []).map((opt, idx) => {
                 const isSelected = answers[current.id] === opt.value
                 const isHovered = hoveredIdx === idx
 

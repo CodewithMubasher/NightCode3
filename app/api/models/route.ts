@@ -10,9 +10,17 @@ const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
 const ROUTEWAY_KEY = process.env.ROUTEWAY_API_KEY
 const NAGA_KEY = process.env.NAGA_API_KEY
 const SAMBANOVA_KEY = process.env.SAMBANOVA_API_KEY
+const CLOUDFLARE_KEY = process.env.CLOUDFLARE_API_TOKEN
 const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = []
+
+const CLOUDFLARE_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
+  { id: "@cf/qwen/qwen2.5-coder-32b-instruct", display_name: "Qwen 2.5 Coder 32B", provider: "cloudflare", provider_display_name: "Cloudflare" },
+  { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", display_name: "Llama 3.3 70B", provider: "cloudflare", provider_display_name: "Cloudflare" },
+  { id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", display_name: "DeepSeek R1 Distill Qwen 32B", provider: "cloudflare", provider_display_name: "Cloudflare" },
+  { id: "@cf/mistral/mistral-7b-instruct-v0.3", display_name: "Mistral 7B", provider: "cloudflare", provider_display_name: "Cloudflare" },
+]
 
 const GOOGLE_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = [
   { id: "gemini-2.5-flash", display_name: "Gemini 2.5 Flash", provider: "google", provider_display_name: "Google" },
@@ -328,6 +336,13 @@ export async function GET() {
         models: snModels,
       })
     }
+  }
+
+  if (CLOUDFLARE_KEY) {
+    groups.push({
+      label: "Cloudflare",
+      models: CLOUDFLARE_MODELS,
+    })
   }
 
   if (PUTER_ENABLED) {

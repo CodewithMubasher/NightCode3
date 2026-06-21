@@ -27,7 +27,7 @@ export function WelcomeScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col sm:items-center sm:justify-center sm:gap-6 sm:px-4 sm:-mt-20">
+    <div className="flex h-full flex-col sm:items-center sm:justify-center sm:gap-6 sm:px-4 sm:-mt-8">
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 sm:flex-initial sm:gap-0">
         <div className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">

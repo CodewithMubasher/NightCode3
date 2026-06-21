@@ -10,17 +10,19 @@ export function renderInlineMarkdown(content: string): ReactNode {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    const trimmed = line.trim()
 
-    if (line.startsWith("```")) {
+    if (trimmed.startsWith("```")) {
       if (inCodeBlock) {
         elements.push(
-          <CodeBlock key={`code-${i}`} content={codeBlockContent} />
+          <CodeBlock key={`code-${i}`} content={codeBlockContent} lang={codeBlockLang} />
         )
         codeBlockContent = ""
+        codeBlockLang = ""
         inCodeBlock = false
       } else {
         inCodeBlock = true
-        codeBlockLang = line.slice(3).trim()
+        codeBlockLang = trimmed.slice(3).trim()
       }
       continue
     }
@@ -30,12 +32,10 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    if (line.trim() === "") {
+    if (trimmed === "") {
       elements.push(<div key={`spacing-${i}`} className="h-2" />)
       continue
     }
-
-    const trimmed = line.trim()
 
     if (trimmed.startsWith("### ")) {
       elements.push(
@@ -103,7 +103,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    if (line.startsWith("|") && line.endsWith("|")) {
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       const rows: string[][] = []
       let j = i
       while (j < lines.length && lines[j].startsWith("|") && lines[j].endsWith("|")) {
@@ -211,8 +211,49 @@ function renderInline(fullContent: string, line: string): ReactNode {
   return parts
 }
 
-function CodeBlock({ content }: { content: string }) {
+const KEYWORD_MAP: Record<string, string[]> = {
+  bash: ["if", "then", "else", "fi", "for", "while", "do", "done", "in", "function", "return", "local", "export", "source", "echo", "exit", "cd", "mkdir", "rm", "cp", "mv", "touch", "cat", "grep", "sed", "awk", "npm", "npx", "yarn", "pnpm", "node", "python", "pip", "docker", "git", "curl", "wget"],
+  js: ["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "new", "this", "async", "await", "import", "export", "from", "class", "extends", "try", "catch", "throw", "typeof", "instanceof", "true", "false", "null", "undefined", "require", "module"],
+  ts: ["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "new", "this", "async", "await", "import", "export", "from", "class", "extends", "interface", "type", "implements", "try", "catch", "throw", "typeof", "instanceof", "true", "false", "null", "undefined", "enum", "readonly", "public", "private", "protected", "abstract", "static"],
+  python: ["def", "class", "return", "if", "elif", "else", "for", "while", "try", "except", "finally", "with", "as", "import", "from", "async", "await", "True", "False", "None", "in", "is", "not", "and", "or", "pass", "raise", "yield", "lambda", "self", "print", "len", "range", "int", "str", "list", "dict", "set", "tuple"],
+  json: ["true", "false", "null"],
+  html: ["html", "head", "body", "div", "span", "p", "a", "img", "ul", "ol", "li", "table", "tr", "td", "th", "form", "input", "button", "script", "style", "link", "meta", "title", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "nav", "header", "footer", "main", "aside", "class", "id", "href", "src", "alt", "rel", "type"],
+  css: ["@import", "@media", "@keyframes", "color", "background", "margin", "padding", "border", "display", "flex", "grid", "position", "top", "left", "right", "bottom", "width", "height", "font", "text", "transform", "transition", "animation", "opacity", "overflow", "z-index", "important"],
+  sql: ["SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "ALTER", "DROP", "INDEX", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "AND", "OR", "NOT", "IN", "LIKE", "BETWEEN", "ORDER", "BY", "GROUP", "HAVING", "LIMIT", "OFFSET", "AS", "DISTINCT", "COUNT", "SUM", "AVG", "MAX", "MIN", "NULL", "IS", "EXISTS", "UNION", "ALL", "CASE", "WHEN", "THEN", "ELSE", "END"],
+}
+
+function highlightLine(line: string, lang: string): ReactNode[] {
+  const keywords = KEYWORD_MAP[lang] ?? []
+  if (keywords.length === 0) return [line]
+
+  const parts: ReactNode[] = []
+  const tokenRegex = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|#.*$|[a-zA-Z_$][\w$]*|[^\s\w]+|\s+)/g
+  let match: RegExpExecArray | null
+  let key = 0
+
+  while ((match = tokenRegex.exec(line)) !== null) {
+    const token = match[0]
+    if (token.startsWith('"') || token.startsWith("'") || token.startsWith("`")) {
+      parts.push(<span key={key++} style={{ color: "#ce9178" }}>{token}</span>)
+    } else if (token.startsWith("//") || token.startsWith("#")) {
+      parts.push(<span key={key++} style={{ color: "#6a9955" }}>{token}</span>)
+    } else if (token.startsWith("/*")) {
+      parts.push(<span key={key++} style={{ color: "#6a9955" }}>{token}</span>)
+    } else if (keywords.includes(token)) {
+      parts.push(<span key={key++} style={{ color: "#569cd6" }}>{token}</span>)
+    } else if (/^\d+(\.\d+)?$/.test(token)) {
+      parts.push(<span key={key++} style={{ color: "#b5cea8" }}>{token}</span>)
+    } else {
+      parts.push(token)
+    }
+  }
+
+  return parts.length > 0 ? parts : [line]
+}
+
+function CodeBlock({ content, lang }: { content: string; lang?: string }) {
   const [copied, setCopied] = useState(false)
+  const lines = content.split("\n")
 
   async function handleCopy() {
     await navigator.clipboard.writeText(content)
@@ -222,18 +263,39 @@ function CodeBlock({ content }: { content: string }) {
 
   return (
     <div className="group relative mb-2 mt-1.5">
-      <button
-        onClick={handleCopy}
-        className="absolute right-2 top-2 opacity-60 transition-opacity hover:opacity-80"
-      >
-        {copied ? (
-          <span className="text-[11px] text-muted-foreground">Copied</span>
+      <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border/50 bg-muted/30 px-3 py-1.5">
+        {lang ? (
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            {lang}
+          </span>
         ) : (
-          <Copy size={14} />
+          <span />
         )}
-      </button>
-      <pre className="overflow-x-auto rounded-lg border border-border/50 bg-muted/50 p-3 text-sm font-mono">
-        <code>{content}</code>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[11px] text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+        >
+          {copied ? (
+            <span className="text-[11px] text-muted-foreground">Copied</span>
+          ) : (
+            <>
+              <Copy size={12} />
+              Copy
+            </>
+          )}
+        </button>
+      </div>
+      <pre className="overflow-x-auto rounded-b-lg border border-border/50 bg-[#0d1117] p-3 text-sm font-mono leading-relaxed">
+        <code>
+          {lang && KEYWORD_MAP[lang]
+            ? lines.map((line, i) => (
+                <span key={i}>
+                  {highlightLine(line, lang)}
+                  {i < lines.length - 1 && "\n"}
+                </span>
+              ))
+            : content}
+        </code>
       </pre>
     </div>
   )

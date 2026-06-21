@@ -45,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useNightCodeStore } from "@/store/nightcode-store"
+import { SettingsDialog } from "@/components/settings-dialog"
 
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
@@ -57,6 +58,7 @@ const navItems = [
 export function AppSidebar() {
   const router = useRouter()
   const [hydrated, setHydrated] = React.useState(false)
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
   React.useEffect(() => { setHydrated(true) }, [])
   const chats = useNightCodeStore((s) => s.chats)
   const projects = useNightCodeStore((s) => s.projects)
@@ -222,7 +224,7 @@ export function AppSidebar() {
                   <User size={14} />
                   <span>Profile</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
                   <Settings size={14} />
                   <span>Settings</span>
                 </DropdownMenuItem>
@@ -260,6 +262,7 @@ export function AppSidebar() {
         [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(9) { animation-delay: 0.18s; }
         [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(10) { animation-delay: 0.2s; }
       `}</style>
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Sidebar>
   )
 }
