@@ -3,11 +3,6 @@ import type { ToolImplementation } from "./tools"
 import { getCompactionsBySession } from "@/lib/db/adapter"
 import { listArtifacts } from "@/lib/engine/artifact-store"
 
-// No OUTPUT FORMAT section needed — the SDK negotiates tool calling format
-// natively with each provider (OpenAI function calling, Gemini, Groq, etc.)
-// Adding JSON format instructions here would confuse the model since it's no
-// longer expected to output JSON manually.
-
 const AGENT_PROMPT = `You are NightCode, an intelligent AI coding assistant with access to tools.
 
 Assess the user's request and decide how to respond:
@@ -28,11 +23,18 @@ DELEGATE TASK: For large codebase investigations that would require reading many
 ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.
 SEARCH MEMORIES: Use search_memories to find relevant facts, decisions, and project context from past conversations stored in artifacts. Search before creating new artifacts to avoid duplicates.`
 
+// ── In-memory compaction cache ──────────────────────────────────────────────
+// Avoids re-querying the DB on every step when compactions haven't changed.
+// Invalidated by the caller after a new compaction is written.
+const compactionCache = new Map<string, { block: string; count: number }>()
+
+export function invalidateCompactionCache(sessionId: string): void {
+  compactionCache.delete(sessionId)
+}
+
 export function buildSystemPrompt(mcpTools?: ToolImplementation[]): string {
   if (!mcpTools || mcpTools.length === 0) return AGENT_PROMPT
 
-  // MCP tools are passed to the SDK as native tools, but we mention them
-  // in the prompt so the model knows they exist and what they're for.
   const mcpSection = mcpTools
     .map((t) => `- ${t.name}: ${t.description}`)
     .join("\n")
@@ -45,6 +47,10 @@ ${mcpSection}`
 
 function buildCompactionBlock(sessionId?: string): string | null {
   if (!sessionId) return null
+
+  const cached = compactionCache.get(sessionId)
+  if (cached && cached.count > 0) return cached.block
+
   const compactions = getCompactionsBySession(sessionId)
   if (compactions.length === 0) return null
 
@@ -64,8 +70,10 @@ function buildCompactionBlock(sessionId?: string): string | null {
 
   if (summaries.length === 0) return null
 
-  return `[Compacted History — earlier steps summarized for context]
+  const block = `[Compacted History — earlier steps summarized for context]
 ${summaries.join("\n\n")}`
+  compactionCache.set(sessionId, { block, count: compactions.length })
+  return block
 }
 
 function buildArtifactBlock(): string | null {
@@ -76,35 +84,31 @@ function buildArtifactBlock(): string | null {
 ${lines.join("\n")}`
 }
 
-function buildSystemMessage(mcpTools?: ToolImplementation[]): string {
-  const basePrompt = buildSystemPrompt(mcpTools)
-  return basePrompt
+export function buildDynamicBlock(sessionId?: string): string | null {
+  const parts: string[] = []
+  const compacted = buildCompactionBlock(sessionId)
+  if (compacted) parts.push(compacted)
+  const artifactBlock = buildArtifactBlock()
+  if (artifactBlock) parts.push(artifactBlock)
+  if (parts.length === 0) return null
+  return `## Session Context\n\n${parts.join("\n\n")}`
 }
 
-/** Builds the full system prompt string and returns conversation messages separately. */
 export function buildRequest(
   messages: Message[],
   systemPrompt: string,
   sessionId?: string
 ): { system: string; messages: Array<{ role: string; content: string }> } {
-  let combinedSystem = systemPrompt
-
-  const compacted = buildCompactionBlock(sessionId)
-  if (compacted) {
-    combinedSystem += "\n\n" + compacted
-  }
-
-  const artifactBlock = buildArtifactBlock()
-  if (artifactBlock) {
-    combinedSystem += "\n\n" + artifactBlock
-  }
-
   const msgs = messages.map((m) => ({ role: m.role, content: m.content }))
 
-  return { system: combinedSystem, messages: msgs }
+  const dynamicBlock = buildDynamicBlock(sessionId)
+  if (dynamicBlock) {
+    msgs.unshift({ role: "user", content: dynamicBlock })
+  }
+
+  return { system: systemPrompt, messages: msgs }
 }
 
-// Kept for backward compatibility — delegates to buildRequest
 export function buildContext(
   messages: Message[],
   systemPrompt: string,

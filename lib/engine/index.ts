@@ -3,7 +3,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { EventEmitter } from "./event-emitter"
 import { AGENT_CONFIG, type ModeConfig } from "./modes"
-import { buildSystemPrompt, buildContext, buildRequest } from "./context-builder"
+import { buildSystemPrompt, buildContext, buildRequest, buildDynamicBlock, invalidateCompactionCache } from "./context-builder"
 import { planStep, type UsageInfo } from "./planner"
 import { flushBatch } from "@/lib/db/batch"
 import { executeTool } from "./executor"
@@ -12,6 +12,7 @@ import type { VerificationResult } from "./tools"
 import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
 import { CompactionService } from "./compaction-service"
+import { Semaphore } from "./semaphore"
 import { createStep, createFileSnapshot } from "@/lib/db/adapter"
 import type { DBFileSnapshot } from "@/lib/db/types"
 
@@ -146,7 +147,9 @@ export class NightCodeEngine {
     }
 
     // Build request — separate system prompt from conversation messages
-    const { system: requestSystemPrompt, messages: initialMessages } = buildRequest(messages, fullSystemPrompt, messageId)
+    const built = buildRequest(messages, fullSystemPrompt, messageId)
+    const requestSystemPrompt = built.system
+    const initialMessages = built.messages
 
     // ── Manual step loop ─────────────────────────────────────────────────────
     // Each iteration:
@@ -164,6 +167,10 @@ export class NightCodeEngine {
     let toolCallCount = 0
     let finalText = ""
     let consecutiveErrors = 0
+    // Track which step produced which messages so we can remove them post-compaction
+    const stepMessages = new Map<number, Array<{ role: string; content: unknown }>>()
+    // Bounded concurrency for parallel tool execution — max 5 concurrent I/O ops
+    const toolSem = new Semaphore(5)
 
     try {
       while (stepNumber < MAX_STEPS) {
@@ -282,9 +289,9 @@ export class NightCodeEngine {
           this.emitEvent("tool_start", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
         }
 
-        // Execute all valid tools in parallel
+        // Execute all valid tools in parallel (bounded to 5 concurrent)
         const execResults = await Promise.all(
-          validCalls.map(async (tc) => {
+          validCalls.map((tc) => toolSem.run(async () => {
             if (tc.toolName === "ask") {
               asked = true
               try {
@@ -331,7 +338,7 @@ export class NightCodeEngine {
             }
             const execResult = await executeTool(tc.toolDef!, tc.args)
             return { tc, ...execResult, skipResult: false, forcedThink: false } as const
-          })
+          }))
         )
 
         // Process all results
@@ -420,7 +427,7 @@ export class NightCodeEngine {
             })
 
             const toolResult = toolIsolation
-              ? toolIsolation.onToolEnd(tc.generatedId, tc.toolName, true, result.data, null, result.data?.executionTime ?? null, verification.evidence)
+              ? toolIsolation.onToolEnd(tc.generatedId, tc.toolName, true, result.data, null, (result as any).executionTime ?? null, verification.evidence)
               : result.data
 
             toolResultMessages.push({
@@ -466,7 +473,39 @@ export class NightCodeEngine {
         }
 
         // ── 5. Trigger compaction if enough steps have passed ──────────────
-        compactionService?.onStepComplete(stepNumber, provider, model)
+        const compactedRange = await compactionService?.onStepComplete(stepNumber, provider, model)
+
+        if (compactedRange) {
+          const { stepRangeStart, stepRangeEnd } = compactedRange
+          // Invalidate compaction cache so buildDynamicBlock re-reads from DB
+          invalidateCompactionCache(messageId)
+          // Rebuild the dynamic context block and update msg[0] in place
+          const newBlock = buildDynamicBlock(messageId)
+          const hasContextHeader = currentMessages.length > 0
+            && currentMessages[0].role === "user"
+            && typeof currentMessages[0].content === "string"
+            && (currentMessages[0].content as string).startsWith("## Session Context")
+          if (newBlock && hasContextHeader) {
+            currentMessages[0] = { role: "user", content: newBlock }
+          } else if (newBlock && !hasContextHeader) {
+            currentMessages = [{ role: "user", content: newBlock }, ...currentMessages]
+          } else if (!newBlock && hasContextHeader) {
+            currentMessages = currentMessages.slice(1)
+          }
+          // Remove raw step messages that are now covered by the compaction summary
+          const toRemove = new Set<{ role: string; content: unknown }>()
+          for (let s = stepRangeStart; s <= stepRangeEnd; s++) {
+            const msgs = stepMessages.get(s)
+            if (msgs) {
+              for (const msg of msgs) toRemove.add(msg)
+              stepMessages.delete(s)
+            }
+          }
+          if (toRemove.size > 0) {
+            currentMessages = currentMessages.filter((m) => !toRemove.has(m))
+            console.log(`[engine] Trimmed ${toRemove.size} messages for steps ${stepRangeStart}-${stepRangeEnd} after compaction, context now ${currentMessages.length} messages`)
+          }
+        }
 
         // ── 4. If model asked questions, pause conversation ────────────────
         flushBatch()
@@ -488,9 +527,18 @@ export class NightCodeEngine {
             input: tc.args,
           })
         }
+
+        // Track these messages so they can be removed by a future compaction
+        const assistantMsg: { role: string; content: unknown } = { role: "assistant", content: assistantContent }
+        const stepMsgList: Array<{ role: string; content: unknown }> = [assistantMsg]
+        for (const tr of toolResultMessages) {
+          stepMsgList.push(tr as { role: string; content: unknown })
+        }
+        stepMessages.set(stepNumber, stepMsgList)
+
         currentMessages = [
           ...currentMessages,
-          { role: "assistant", content: assistantContent },
+          assistantMsg,
           ...toolResultMessages,
         ]
 

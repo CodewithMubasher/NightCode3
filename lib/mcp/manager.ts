@@ -47,13 +47,22 @@ export async function connectMCP(config: MCPConfig): Promise<string[]> {
     } finally {
       clearTimeout(timer)
     }
-    clearTimeout(timer)
     const toolNames = (toolsResult.tools ?? []).map((t) => t.name)
 
     connections.set(config.name, { config, client })
     return toolNames
   } catch (err) {
     throw new Error(`Failed to connect MCP '${config.name}': ${err instanceof Error ? err.message : "Unknown error"}`)
+  }
+}
+
+export async function ensureConnected(config: MCPConfig): Promise<void> {
+  if (connections.has(config.name)) return
+  try {
+    await connectMCP(config)
+    console.log(`MCP connected: ${config.name}`)
+  } catch (err) {
+    console.error(`MCP connect failed for ${config.name}:`, (err as Error).message)
   }
 }
 
@@ -93,7 +102,7 @@ export function getAllConnectionStatuses(configs: MCPConfig[]): Record<string, "
   return statuses
 }
 
-// Cleanup all MCP processes on server shutdown
+// Warm connections persist until server shutdown (not per-request)
 async function shutdown() {
   await disconnectAll()
 }

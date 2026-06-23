@@ -1,6 +1,6 @@
 import type { ToolImplementation } from "@/lib/engine/tools"
 import { loadMCPConfigs } from "./storage"
-import { connectMCP } from "./manager"
+import { connectMCP, ensureConnected } from "./manager"
 
 let mcpBuiltinTools: ToolImplementation[] = []
 
@@ -34,14 +34,10 @@ export async function createMCPToolImplementations(): Promise<ToolImplementation
   const { connections } = await import("./manager")
   const configs = loadMCPConfigs()
 
+  // Connect only servers that aren't already warm
   for (const config of configs) {
-    if (config.enabled && !connections.has(config.name)) {
-      try {
-        await connectMCP(config)
-        console.log(`MCP auto-connected: ${config.name}`)
-      } catch (err) {
-        console.error(`MCP connect failed for ${config.name}:`, (err as Error).message)
-      }
+    if (config.enabled) {
+      await ensureConnected(config)
     }
   }
 

@@ -8,6 +8,7 @@ import type {
   DBAgentEvent,
   DBCompaction,
   DBFileSnapshot,
+  DBArtifact,
 } from "./types"
 
 function q(sql: string, params: Record<string, unknown>): void {
@@ -129,6 +130,38 @@ export function getSnapshotsBySession(sessionId: string): DBFileSnapshot[] {
   return getDb().prepare("SELECT * FROM file_snapshots WHERE session_id = ? ORDER BY created_at ASC").all(sessionId) as DBFileSnapshot[]
 }
 
+// ─── Artifacts ────────────────────────────────────────────────────────────────
+
+export function createDBArtifact(a: DBArtifact): void {
+  q(`
+    INSERT INTO artifacts (id, title, type, content, session_id, created_at, updated_at)
+    VALUES (@id, @title, @type, @content, @session_id, @created_at, @updated_at)
+  `, a as unknown as Record<string, unknown>)
+}
+
+export function getDBArtifact(id: string): DBArtifact | undefined {
+  return getDb().prepare("SELECT * FROM artifacts WHERE id = ?").get(id) as DBArtifact | undefined
+}
+
+export function listDBArtifacts(): DBArtifact[] {
+  return getDb().prepare("SELECT * FROM artifacts ORDER BY created_at ASC").all() as DBArtifact[]
+}
+
+export function updateDBArtifact(id: string, updates: Partial<Pick<DBArtifact, "title" | "type" | "content" | "updated_at">>): void {
+  const sets: string[] = []
+  const params: Record<string, unknown> = { id }
+  for (const [key, value] of Object.entries(updates)) {
+    sets.push(`${key} = @${key}`)
+    params[key] = value
+  }
+  if (sets.length === 0) return
+  q(`UPDATE artifacts SET ${sets.join(", ")} WHERE id = @id`, params)
+}
+
+export function deleteDBArtifact(id: string): void {
+  q("DELETE FROM artifacts WHERE id = @id", { id })
+}
+
 // ─── cleanup ──────────────────────────────────────────────────────────────────
 
 export function deleteSessionCascade(sessionId: string): void {
@@ -138,6 +171,7 @@ export function deleteSessionCascade(sessionId: string): void {
     db.prepare("DELETE FROM file_snapshots WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM agent_events WHERE session_id = ?").run(sessionId)
+    db.prepare("DELETE FROM artifacts WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM tool_results WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run(sessionId)
     db.prepare("DELETE FROM agent_steps WHERE session_id = ?").run(sessionId)

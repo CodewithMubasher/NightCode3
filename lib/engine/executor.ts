@@ -18,7 +18,7 @@ export async function executeTool(
     }
     const executionTime = performance.now() - start
     if (result.success) {
-      return { ...result, data: { ...result.data, executionTime } }
+      return { ...result, executionTime, data: result.data }
     }
     return result
   } catch (err) {

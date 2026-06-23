@@ -26,6 +26,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{
           __html: `!function(){try{var s=JSON.parse(localStorage.getItem("nightcode-store")||"{}");var st=s&&s.state&&s.state.settings;if(st){if(st.primaryColor){document.documentElement.style.setProperty("--primary-color",st.primaryColor);document.documentElement.style.setProperty("--primary",st.primaryColor)}if(st.reducedMotion){document.documentElement.classList.add("reduce-motion")}}}catch(e){}}()`
         }} />
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400&display=swap" />
       </head>
       <body suppressHydrationWarning>
         <ThemeProvider>

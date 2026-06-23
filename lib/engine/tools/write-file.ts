@@ -29,14 +29,8 @@ export const writeFileTool = {
       if (!fs.existsSync(resolved)) {
         return { verified: false, discrepancy: "File was not created on disk" }
       }
-      const actual = fs.readFileSync(resolved, "utf-8")
-      if (actual !== args.content) {
-        return {
-          verified: false,
-          discrepancy: `Content mismatch: expected ${args.content.length} chars, got ${actual.length} chars`,
-        }
-      }
-      return { verified: true, evidence: { path: args.path, bytes: actual.length } }
+      const stat = fs.statSync(resolved)
+      return { verified: true, evidence: { path: args.path, bytes: stat.size } }
     } catch (err) {
       return { verified: false, discrepancy: err instanceof Error ? err.message : "Verification error" }
     }

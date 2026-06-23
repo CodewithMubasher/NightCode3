@@ -68,3 +68,13 @@ export interface DBFileSnapshot {
   existed_before: number
   created_at: number
 }
+
+export interface DBArtifact {
+  id: string
+  title: string
+  type: string
+  content: string
+  session_id: string | null
+  created_at: number
+  updated_at: number
+}

@@ -41,20 +41,21 @@ export class CompactionService {
     stepNumber: number,
     provider: AIProvider,
     modelId: string
-  ): Promise<void> {
+  ): Promise<{ stepRangeStart: number; stepRangeEnd: number } | null> {
     this.stepCountSinceLastCompaction++
 
-    if (this.stepCountSinceLastCompaction < this.compactionInterval) return
+    if (this.stepCountSinceLastCompaction < this.compactionInterval) return null
 
-    await this.compact(stepNumber, provider, modelId)
+    const range = await this.compact(stepNumber, provider, modelId)
     this.stepCountSinceLastCompaction = 0
+    return range
   }
 
   private async compact(
     currentStepNumber: number,
     provider: AIProvider,
     modelId: string
-  ): Promise<void> {
+  ): Promise<{ stepRangeStart: number; stepRangeEnd: number }> {
     const lastCompactions = getCompactionsBySession(this.sessionId)
     const lastCompactedStep = lastCompactions.length > 0
       ? lastCompactions[lastCompactions.length - 1].step_range_end
@@ -62,7 +63,7 @@ export class CompactionService {
 
     const steps = getStepsBySession(this.sessionId)
     const newSteps = steps.filter((s) => s.step_number > lastCompactedStep)
-    if (newSteps.length === 0) return
+    if (newSteps.length === 0) return { stepRangeStart: lastCompactedStep + 1, stepRangeEnd: lastCompactedStep }
 
     const toolCalls = getToolCallsBySession(this.sessionId)
     const toolResults = getToolResultsBySession(this.sessionId)
@@ -91,16 +92,20 @@ export class CompactionService {
 
     const summary = await this.summarizeSteps(stepData, provider, modelId)
 
+    const stepRangeStart = lastCompactedStep + 1
+    const stepRangeEnd = currentStepNumber
+
     createCompaction({
       id: generateId(),
       session_id: this.sessionId,
-      step_range_start: lastCompactedStep + 1,
-      step_range_end: currentStepNumber,
+      step_range_start: stepRangeStart,
+      step_range_end: stepRangeEnd,
       summary: JSON.stringify(summary),
       created_at: Date.now(),
     })
 
-    console.log(`[compaction] Compacted steps ${lastCompactedStep + 1}-${currentStepNumber}`)
+    console.log(`[compaction] Compacted steps ${stepRangeStart}-${stepRangeEnd}`)
+    return { stepRangeStart, stepRangeEnd }
   }
 
   private async summarizeSteps(

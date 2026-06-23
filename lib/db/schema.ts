@@ -102,6 +102,18 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_compactions_session ON compactions(session_id);
     CREATE INDEX IF NOT EXISTS idx_file_snapshots_session ON file_snapshots(session_id);
 
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id          TEXT PRIMARY KEY,
+      title       TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'markdown',
+      content     TEXT NOT NULL DEFAULT '',
+      session_id  TEXT REFERENCES sessions(id),
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id);
+
     CREATE TABLE IF NOT EXISTS account_keys (
       env_name      TEXT NOT NULL,
       key_value     TEXT NOT NULL,

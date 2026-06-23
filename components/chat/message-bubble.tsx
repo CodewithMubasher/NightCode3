@@ -324,8 +324,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               </Attachments>
             </div>
           )}
-          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-2.5 text-base text-foreground">
-            <p className="leading-relaxed">{message.content}</p>
+
+          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-3 text-foreground tracking-wider"
+               style={{ fontFamily: "var(--font-message)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
+            <p>{message.content}</p>
           </div>
         </div>
       </div>
@@ -395,7 +397,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
 
           {message.content && (
-            <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
+            <div className="prose prose-invert max-w-none w-full min-w-0 mt-1 tracking-wider"
+                 style={{ fontFamily: "var(--font-message)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}
             </div>
           )}

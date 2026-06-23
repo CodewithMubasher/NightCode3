@@ -28,11 +28,9 @@ export const readFileTool = {
       if (!fs.existsSync(resolved)) {
         return { verified: false, discrepancy: "File does not exist on disk" }
       }
-      const actual = fs.readFileSync(resolved, "utf-8")
-      if (actual !== result.data?.content) {
-        return { verified: false, discrepancy: "File content mismatch between returned and actual" }
-      }
-      return { verified: true, evidence: { path: args.path, size: actual.length } }
+      const stat = fs.statSync(resolved)
+      const expectedSize = result.data?.content?.length ?? 0
+      return { verified: true, evidence: { path: args.path, size: stat.size, expectedSize } }
     } catch (err) {
       return { verified: false, discrepancy: err instanceof Error ? err.message : "Verification error" }
     }

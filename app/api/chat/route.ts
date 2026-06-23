@@ -8,7 +8,27 @@ import { CompactionService } from "@/lib/engine/compaction-service"
 import { initSchema } from "@/lib/db/schema"
 import { createSession } from "@/lib/db/adapter"
 import { enableBatching, disableBatching, flushBatch } from "@/lib/db/batch"
-import { disconnectAll } from "@/lib/mcp/manager"
+import { loadMCPConfigs } from "@/lib/mcp/storage"
+import { ensureConnected } from "@/lib/mcp/manager"
+
+// Lazy singleton: MCP connections and tool definitions are initialized once
+// and stay warm across requests instead of spawning subprocesses per request.
+let mcpToolsPromise: Promise<ToolImplementation[]> | null = null
+
+function getMCPTools(): Promise<ToolImplementation[]> {
+  if (!mcpToolsPromise) {
+    mcpToolsPromise = (async () => {
+      const configs = loadMCPConfigs()
+      for (const config of configs) {
+        if (config.enabled) {
+          await ensureConnected(config)
+        }
+      }
+      return createMCPToolImplementations()
+    })()
+  }
+  return mcpToolsPromise
+}
 
 export async function POST(req: Request) {
   enableBatching()
@@ -71,13 +91,9 @@ export async function POST(req: Request) {
         const unsubSSE = engine.subscribe((_event, data: any) => {
           if (abortController.signal.aborted) return
           console.log('SSE event:', data.type, data.payload ? JSON.stringify(data.payload).substring(0, 100) : '')
-          // Backpressure: if consumer is slow, drop non-critical text_delta events
-          // to avoid OOM. Critical events (tool_start, tool_end, artifact, etc.)
-          // are always sent — they're small and essential for UI correctness.
           const desiredSize = controller.desiredSize
           if (desiredSize !== null && desiredSize < 0) {
             if (data.type === "text_delta") {
-              // Always send text deltas even under backpressure (user experience)
               try {
                 const line = `data: ${JSON.stringify(data)}\n\n`
                 controller.enqueue(encoder.encode(line))
@@ -106,7 +122,7 @@ export async function POST(req: Request) {
 
         let mcpTools: ToolImplementation[] = []
         try {
-          mcpTools = await createMCPToolImplementations()
+          mcpTools = await getMCPTools()
         } catch {}
         console.log(`Loaded ${mcpTools.length} MCP tools`)
 
@@ -135,7 +151,6 @@ export async function POST(req: Request) {
           unsubRecorder()
           flushBatch()
           disableBatching()
-          await disconnectAll()
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))
           controller.close()
         }
@@ -152,7 +167,6 @@ export async function POST(req: Request) {
   } catch (err) {
     flushBatch()
     disableBatching()
-    await disconnectAll()
     const msg = err instanceof Error ? err.message : "Invalid request"
     return new Response(
       `data: ${JSON.stringify({ type: "error", payload: { message: msg }, timestamp: Date.now() })}\n\ndata: [DONE]\n\n`,
