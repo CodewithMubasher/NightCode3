@@ -11,6 +11,8 @@ import { askTool } from "./ask"
 import { listArtifactsTool, readArtifactTool, editArtifactTool } from "./artifact-tools"
 import { searchMemoriesTool } from "./search-memories"
 import { delegateTaskTool } from "./delegate-task"
+import { grepTool } from "./grep"
+import { editFileTool } from "./edit-file"
 
 export interface ToolImplementation {
   name: string
@@ -49,4 +51,6 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   read_artifact: readArtifactTool,
   edit_artifact: editArtifactTool,
   search_memories: searchMemoriesTool,
+  grep: grepTool,
+  edit_file: editFileTool,
 }

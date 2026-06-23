@@ -14,11 +14,29 @@ function resolvePath(filePath: string): string {
 
 export const readFileTool = {
   name: "read_file",
-  description: "Read the contents of a file. Use relative paths like 'project/file.html', never absolute paths.",
-  schema: { path: "string" },
-  async execute(args: { path: string }) {
+  description: "Read the contents of a file (relative path). Optionally specify offset (1-based line number) and limit (number of lines) to read a specific section instead of the entire file.",
+  schema: { path: "string", offset: "number", limit: "number" },
+  async execute(args: { path: string; offset?: number; limit?: number }) {
     const resolved = resolvePath(args.path)
     const content = fs.readFileSync(resolved, "utf-8")
+
+    if (args.offset || args.limit) {
+      const lines = content.split("\n")
+      const start = args.offset ? Math.max(0, args.offset - 1) : 0
+      const count = args.limit ?? lines.length
+      const sliced = lines.slice(start, start + count)
+      return {
+        success: true,
+        data: {
+          content: sliced.join("\n"),
+          path: args.path,
+          totalLines: lines.length,
+          startLine: start + 1,
+          endLine: start + sliced.length,
+        },
+      }
+    }
+
     return { success: true, data: { content, path: args.path, size: content.length } }
   },
   async verify(args: { path: string }, result: { success: boolean; data?: { content: string } }) {

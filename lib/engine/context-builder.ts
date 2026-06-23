@@ -27,7 +27,11 @@ FILE PATHS: All paths are relative to the workspace directory. Use "project/inde
 
 SILENT BUILDING: When building or writing code, call tools immediately. Do NOT output any text describing what you will do or explaining your plan. No "I'll create...", no "Let me build...", no "First I'll...". Silence the narration. Call the tools. If you need to explain what was done, do it as a single summary AFTER all tool calls complete.
 
-PROJECT CREATION: When initializing a project or creating multiple files for a feature, you MUST batch all file writes into a SINGLE parallel step. Do not create files one at a time — the system supports parallel tool calls. Call write_file for every file simultaneously.`
+PROJECT CREATION: When initializing a project or creating multiple files for a feature, you MUST batch all file writes into a SINGLE parallel step. Do not create files one at a time — the system supports parallel tool calls. Call write_file for every file simultaneously.
+
+SURGICAL EDITS: For small changes (fix a typo, rename a variable, update a single line), use edit_file instead of write_file. edit_file replaces exact text without regenerating the entire file. This is faster and uses fewer tokens.
+
+CONTENT SEARCH: Use grep to search file contents for patterns (function names, imports, variables). It returns matching lines with line numbers. Use read_file with offset and limit to read specific sections of a file instead of the entire file.`
 
 // ── In-memory compaction cache ──────────────────────────────────────────────
 // Avoids re-querying the DB on every step when compactions haven't changed.
