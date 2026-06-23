@@ -14,7 +14,7 @@ function resolvePath(filePath: string): string {
 
 export const writeFileTool = {
   name: "write_file",
-  description: "Write content to a file. Creates parent directories automatically.",
+  description: "Write content to a file (relative path). CRITICAL: When creating a project or multiple related files (e.g., index.html, style.css, app.js), you MUST call this tool multiple times in PARALLEL within a single response step. Never write files one at a time.",
   schema: { path: "string", content: "string" },
   async execute(args: { path: string; content: string }) {
     const resolved = resolvePath(args.path)

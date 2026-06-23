@@ -1,8 +1,26 @@
 import { useState, type ReactNode } from "react"
 import { Copy } from "lucide-react"
 
+function normalizeMarkdown(raw: string): string {
+  let s = raw
+
+  // 1. Inject newline before any heading not already at line start
+  s = s.replace(/([^\n])(#{1,3}\s)/g, "$1\n$2")
+
+  // 2. After a heading, split before | that immediately follows
+  s = s.replace(/(#{1,3}\s[^\n|]+)\|/g, "$1\n|")
+
+  // 3. Replace || (double pipe) with pipe + newline + pipe
+  s = s.replace(/\|{2,}/g, "|\n|")
+
+  // 4. Collapse excess blank lines
+  s = s.replace(/\n{3,}/g, "\n\n")
+
+  return s
+}
+
 export function renderInlineMarkdown(content: string): ReactNode {
-  const lines = content.split("\n")
+  const lines = normalizeMarkdown(content).split("\n")
   const elements: ReactNode[] = []
   let inCodeBlock = false
   let codeBlockContent = ""
@@ -11,6 +29,19 @@ export function renderInlineMarkdown(content: string): ReactNode {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmed = line.trim()
+
+    // ── Split hybrid heading+table lines (e.g. "### Files| Col | Col |") ─
+    if ((trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) && trimmed.includes("|")) {
+      const pipeIndex = trimmed.indexOf("|")
+      const headingPart = trimmed.slice(0, pipeIndex).trim()
+      const tablePart = trimmed.slice(pipeIndex)
+      lines.splice(i, 1, headingPart, tablePart)
+      i--
+      continue
+    }
+
+    // ── Drop orphaned separator rows ─────────────────────────────────────
+    if (/^\|[\s|:\-]+\|$/.test(trimmed)) continue
 
     // ── Code fence ──────────────────────────────────────────────────────
     if (trimmed.startsWith("```")) {
@@ -46,6 +77,9 @@ export function renderInlineMarkdown(content: string): ReactNode {
       elements.push(<div key={`spacing-${i}`} className="h-1.5" />)
       continue
     }
+
+    // ── Drop bare # / ## / ### with no text (LLM artifacts) ─────────────
+    if (/^#{1,3}$/.test(trimmed)) continue
 
     // ── Headings ─────────────────────────────────────────────────────────
     if (trimmed.startsWith("### ")) {
@@ -143,7 +177,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
         lines[j].trim().endsWith("|")
       ) {
         // skip separator rows like |---|---|
-        if (!/^\|[\s|:-]+\|$/.test(lines[j].trim())) {
+        if (!/^\|[\s|:\-]+\|$/.test(lines[j].trim())) {
           rows.push(
             lines[j]
               .split("|")
@@ -160,8 +194,8 @@ export function renderInlineMarkdown(content: string): ReactNode {
             <thead>
               <tr className="border-b border-white/10">
                 {header.map((h, k) => (
-                  <th key={k} className="px-3 py-1.5 text-left font-medium text-white/50">
-                    {h}
+                  <th key={k} className="px-3 py-2.5 text-left font-medium text-white/50">
+                    {renderInline(h)}
                   </th>
                 ))}
               </tr>
@@ -170,8 +204,8 @@ export function renderInlineMarkdown(content: string): ReactNode {
               {body.map((row, k) => (
                 <tr key={k} className="border-b border-white/[0.06] last:border-0">
                   {row.map((cell, l) => (
-                    <td key={l} className="px-3 py-1.5 text-white/80">
-                      {cell}
+                    <td key={l} className="px-3 py-2 text-white/80">
+                      {renderInline(cell)}
                     </td>
                   ))}
                 </tr>
@@ -185,6 +219,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
     }
 
     // ── Paragraph ────────────────────────────────────────────────────────
+    if (/^\|[\s|:\-]+\|$/.test(trimmed)) continue
     elements.push(
       <p key={`p-${i}`} className="mb-2 text-[15px] leading-relaxed last:mb-0">
         {renderInline(line)}

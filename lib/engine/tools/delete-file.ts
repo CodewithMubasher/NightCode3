@@ -14,7 +14,7 @@ function resolvePath(filePath: string): string {
 
 export const deleteFileTool = {
   name: "delete_file",
-  description: "Delete a file or directory (recursively).",
+  description: "Delete a file or directory (recursively). Use relative paths like 'project/file.html', never absolute paths.",
   schema: { path: "string" },
   async execute(args: { path: string }) {
     const resolved = resolvePath(args.path)

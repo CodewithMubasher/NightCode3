@@ -14,7 +14,7 @@ function resolvePath(dirPath: string): string {
 
 export const createFolderTool = {
   name: "create_folder",
-  description: "Create a new directory. Creates parent directories automatically.",
+  description: "Create a new directory. Creates parent directories automatically. Use relative paths like 'project/images', never absolute paths.",
   schema: { path: "string" },
   async execute(args: { path: string }) {
     const resolved = resolvePath(args.path)

@@ -14,7 +14,7 @@ function resolvePath(filePath: string): string {
 
 export const readFileTool = {
   name: "read_file",
-  description: "Read the contents of a file.",
+  description: "Read the contents of a file. Use relative paths like 'project/file.html', never absolute paths.",
   schema: { path: "string" },
   async execute(args: { path: string }) {
     const resolved = resolvePath(args.path)

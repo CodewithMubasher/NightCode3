@@ -13,6 +13,7 @@ import {
   AttachmentPreview,
 } from "@/components/ai-elements/attachments"
 import { renderInlineMarkdown } from "@/lib/render-markdown"
+import { cn } from "@/lib/utils"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { toast } from "sonner"
 
@@ -147,7 +148,15 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
           </span>
           {args && isFilePath && (
             <span
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans cursor-default",
+                toolState.tool === "write_file" && args.endsWith(".html") && "cursor-pointer hover:border-blue-500/40 hover:text-blue-400 transition-colors duration-150"
+              )}
+              onClick={() => {
+                if (toolState.tool === "write_file" && args.endsWith(".html")) {
+                  useNightCodeStore.getState().openPreview(args)
+                }
+              }}
               style={{
                 background: "#1A1A1A",
                 border: "1px solid rgba(255,255,255,0.08)",

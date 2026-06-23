@@ -2,6 +2,19 @@ import { NextResponse } from "next/server"
 
 import { getApiKey } from "@/lib/keys"
 
+type ModelGroup = { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }
+
+const CACHE_TTL = 300_000 // 5 minutes
+let cache: { data: ModelGroup[]; expiry: number } | null = null
+
+async function getCached(fetchFn: () => Promise<ModelGroup[]>): Promise<ModelGroup[]> {
+  const now = Date.now()
+  if (cache && cache.expiry > now) return cache.data
+  const data = await fetchFn()
+  cache = { data, expiry: now + CACHE_TTL }
+  return data
+}
+
 const GROQ_KEY = () => getApiKey("GROQ_API_KEY")
 const GOOGLE_KEY = () => getApiKey("GOOGLE_GENERATIVE_AI_API_KEY")
 const OPENROUTER_KEY = () => getApiKey("OPENROUTER_API_KEY")
@@ -241,9 +254,10 @@ async function fetchPuterModels() {
 }
 
 export async function GET() {
-  const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
+  return getCached(async () => {
+    const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
-  if (GROQ_KEY()) {
+    if (GROQ_KEY()) {
     const groqModels = await fetchGroqModels()
     if (groqModels) {
       groups.push({
@@ -366,5 +380,6 @@ export async function GET() {
     })
   }
 
-  return NextResponse.json(groups)
+    return groups
+  }).then((groups) => NextResponse.json(groups))
 }

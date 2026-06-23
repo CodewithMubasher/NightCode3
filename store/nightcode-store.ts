@@ -26,6 +26,10 @@ interface NightCodeState {
   pendingConfirmation: PendingConfirmation | null
   dismissConfirmation: () => void
   settings: AppSettings
+  previewFilePath: string | null
+  isPreviewOpen: boolean
+  openPreview: (path: string) => void
+  closePreview: () => void
 
   createChat: (model?: string, provider?: string, projectId?: string) => string
   deleteChat: (id: string) => void
@@ -71,6 +75,8 @@ export const useNightCodeStore = create<NightCodeState>()(
       projects: [],
       activeProjectId: null,
       isStreaming: false,
+      previewFilePath: null,
+      isPreviewOpen: false,
       askData: null,
       pendingConfirmation: null,
       settings: {
@@ -450,14 +456,24 @@ export const useNightCodeStore = create<NightCodeState>()(
                   case "tool_start": {
                     const toolCallId = parsed.payload?.toolCallId as string
                     if (!toolCallId) break
+                    const tool = (parsed.payload?.tool as string) ?? "unknown"
+                    const args = (parsed.payload?.args as Record<string, unknown>) ?? {}
                     const ts: ToolState = {
                       id: toolCallId,
-                      tool: (parsed.payload?.tool as string) ?? "unknown",
-                      args: (parsed.payload?.args as Record<string, unknown>) ?? {},
+                      tool,
+                      args,
                       status: "running",
                       timestamp: parsed.timestamp ?? Date.now(),
                     }
                     get().updateToolState(chatId, assistantMessage.id, ts)
+                    if (
+                      tool === "write_file" &&
+                      typeof args.path === "string" &&
+                      args.path.endsWith(".html") &&
+                      typeof window !== "undefined"
+                    ) {
+                      get().openPreview(args.path)
+                    }
                     break
                   }
                   case "tool_end": {
@@ -681,6 +697,8 @@ export const useNightCodeStore = create<NightCodeState>()(
         await get().sendMessage(chatId, lines.join("\n\n"))
       },
       clearAll: () => set({ chats: [], activeChatId: null }),
+      openPreview: (path) => set({ previewFilePath: path, isPreviewOpen: true }),
+      closePreview: () => set({ isPreviewOpen: false, previewFilePath: null }),
     }),
     {
       name: "nightcode-store",

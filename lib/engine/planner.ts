@@ -263,6 +263,7 @@ export async function planStep(
       tools: tools as ToolSet | undefined,
       temperature: 0.3,
       abortSignal: signal,
+      onError: () => {}, // suppress default console.error — we handle errors in fullStream
       onChunk: ({ chunk }) => {
         if (chunk.type === "text-delta" && callbacks.onText) {
           const safe = sanitizeText(chunk.text)
@@ -285,7 +286,16 @@ export async function planStep(
           args: chunk.input as Record<string, unknown>,
         })
       } else if (chunk.type === "error") {
-        throw chunk.error
+        const err = chunk.error as Record<string, unknown>
+        const toolName = err?.toolName as string | undefined
+        const toolInput = err?.toolInput
+        console.error(
+          `[planner] Tool call rejected: "${err?.message as string}".` +
+          (toolName ? ` Tool: "${toolName}".` : "") +
+          (toolInput ? ` Args: ${JSON.stringify(toolInput)}.` : "") +
+          ` Registered: [${Object.keys(tools ?? {}).join(", ")}]`
+        )
+        throw err
       }
     }
 
@@ -316,7 +326,12 @@ export async function planStep(
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error"
-    console.error(`[planner] Tool calling failed: ${msg}. Retrying without tools.`)
+    const cause = (err as any)?.cause
+    console.error(
+      `[planner] Tool calling failed: ${msg}.` +
+      (cause ? ` Cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}.` : "") +
+      ` Retrying without tools.`
+    )
 
     // Fallback: text-only request with retry
     // Strip tool-call/tool-result messages since no tools are registered

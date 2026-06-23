@@ -21,7 +21,13 @@ PARALLEL TOOL RULE: You can call multiple independent tools in a single step. Fo
 DELEGATE TASK: For large codebase investigations that would require reading many files, use delegate_task to spawn a focused sub-agent. Specify the task, files to examine, and focus area. The sub-agent will return a structured summary so you don't drown in raw file contents. Use multiple delegate_task calls in parallel to investigate different areas simultaneously.
 
 ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.
-SEARCH MEMORIES: Use search_memories to find relevant facts, decisions, and project context from past conversations stored in artifacts. Search before creating new artifacts to avoid duplicates.`
+SEARCH MEMORIES: Use search_memories to find relevant facts, decisions, and project context from past conversations stored in artifacts. Search before creating new artifacts to avoid duplicates.
+
+FILE PATHS: All paths are relative to the workspace directory. Use "project/index.html", not "/project/index.html" or "C:/project/index.html". Do not start paths with /.
+
+SILENT BUILDING: When building or writing code, call tools immediately. Do NOT output any text describing what you will do or explaining your plan. No "I'll create...", no "Let me build...", no "First I'll...". Silence the narration. Call the tools. If you need to explain what was done, do it as a single summary AFTER all tool calls complete.
+
+PROJECT CREATION: When initializing a project or creating multiple files for a feature, you MUST batch all file writes into a SINGLE parallel step. Do not create files one at a time — the system supports parallel tool calls. Call write_file for every file simultaneously.`
 
 // ── In-memory compaction cache ──────────────────────────────────────────────
 // Avoids re-querying the DB on every step when compactions haven't changed.
