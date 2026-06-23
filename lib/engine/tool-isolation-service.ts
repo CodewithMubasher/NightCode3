@@ -86,8 +86,16 @@ export type ToolIsolationConfig = {
   enabled: boolean
 }
 
+export type ToolLifecycleEvent = {
+  type: "pending" | "running" | "completed" | "error"
+  toolCallId: string
+  toolName: string
+  timestamp: number
+}
+
 export class ToolIsolationService {
   private currentStepId = ""
+  private lifecycleLog: ToolLifecycleEvent[] = []
 
   constructor(private config: ToolIsolationConfig) {}
 
@@ -95,12 +103,16 @@ export class ToolIsolationService {
     return this.config.enabled
   }
 
+  getLifecycleLog(): readonly ToolLifecycleEvent[] {
+    return this.lifecycleLog
+  }
+
   /** Set the step ID for the current engine iteration. */
   setStepId(stepId: string): void {
     this.currentStepId = stepId
   }
 
-  onToolStart(toolName: string, args: Record<string, unknown>, callNumber: number): string {
+  registerToolCall(toolName: string, args: Record<string, unknown>, callNumber: number): string {
     const toolCallId = `${toolName}_${callNumber}_${generateId().slice(0, 8)}`
     if (this.enabled) {
       createToolCall({
@@ -109,14 +121,22 @@ export class ToolIsolationService {
         session_id: this.config.sessionId,
         tool_name: toolName,
         args: JSON.stringify(args),
-        status: "running",
+        status: "pending",
         created_at: Date.now(),
       })
     }
+    this.lifecycleLog.push({ type: "pending", toolCallId, toolName, timestamp: Date.now() })
     return toolCallId
   }
 
-  onToolEnd(
+  markRunning(toolCallId: string, toolName: string): void {
+    if (this.enabled) {
+      updateToolCallStatus(toolCallId, "running")
+    }
+    this.lifecycleLog.push({ type: "running", toolCallId, toolName, timestamp: Date.now() })
+  }
+
+  completeTool(
     toolCallId: string,
     toolName: string,
     success: boolean,
@@ -143,11 +163,17 @@ export class ToolIsolationService {
       })
     }
 
+    this.lifecycleLog.push({
+      type: success ? "completed" : "error",
+      toolCallId,
+      toolName,
+      timestamp: Date.now(),
+    })
+
     if (!success) {
       return { error }
     }
 
-    // Always summarize to avoid context pollution (regardless of enabled flag)
     return this.summarize(toolName, data)
   }
 

@@ -147,6 +147,18 @@ export type PlannerCallbacks = {
   onText?: (text: string) => void
 }
 
+function getTemperature(modelId: string): number | undefined {
+  const id = modelId.toLowerCase()
+  if (id.includes("qwen")) return 0.55
+  if (id.includes("gemini")) return 1.0
+  if (id.includes("o1") || id.includes("o3") || id.includes("o4") || id.includes("o5")) return 1.0
+  if (id.includes("gpt-5")) return 1.0
+  if (id.includes("deepseek")) return 0.7
+  if (id.includes("claude-sonnet-5")) return 1.0
+  if (id.includes("claude")) return undefined
+  return 0.3
+}
+
 // ─── Single-step planner ───────────────────────────────────────────────────────
 // Unlike the old plan(), this function does ONE LLM call — it does NOT manage
 // the agent loop. Tools are registered WITHOUT execute so the SDK returns
@@ -256,19 +268,49 @@ export async function planStep(
     messages: Array<{ role: string; content: unknown }>,
     tools: Record<string, unknown> | undefined
   ): Promise<{ text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage: UsageInfo | undefined }> {
+    const repairAliases: Record<string, string> = {
+      create_file: "write_file",
+      make_file: "write_file",
+      new_file: "write_file",
+      create_directory: "create_folder",
+      make_folder: "create_folder",
+      remove_file: "delete_file",
+      list_files: "list_directory",
+      search_code: "search_files",
+    }
+
     const result = streamText({
       model,
       system: systemPrompt,
       messages: messages as any,
       tools: tools as ToolSet | undefined,
-      temperature: 0.3,
+      temperature: getTemperature(modelId),
       abortSignal: signal,
-      onError: () => {}, // suppress default console.error — we handle errors in fullStream
+      onError: () => {},
       onChunk: ({ chunk }) => {
         if (chunk.type === "text-delta" && callbacks.onText) {
           const safe = sanitizeText(chunk.text)
           if (safe) callbacks.onText(safe)
         }
+      },
+      experimental_repairToolCall: async ({ toolCall, error }) => {
+        const lowerName = toolCall.toolName.toLowerCase().replace(/-/g, "_")
+        const registered = sdkTools[lowerName] ?? sdkTools[repairAliases[lowerName]] ?? null
+
+        if (registered && lowerName !== toolCall.toolName) {
+          return { ...toolCall, toolName: lowerName }
+        }
+        if (registered && repairAliases[lowerName]) {
+          return { ...toolCall, toolName: repairAliases[lowerName] }
+        }
+
+        try {
+          JSON.parse(toolCall.input)
+        } catch {
+          return null
+        }
+
+        return null
       },
     })
 

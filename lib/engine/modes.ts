@@ -33,3 +33,13 @@ export const AGENT_CONFIG: ModeConfig = {
   retryPolicy: "lenient",
   intentDefault: "tool_optional",
 }
+
+export const CAAT_CONFIG: ModeConfig = {
+  tools: [
+    { name: "execute_workspace_script" },
+  ],
+  maxIterations: 30,
+  allowAutoFix: true,
+  retryPolicy: "lenient",
+  intentDefault: "tool_required",
+}

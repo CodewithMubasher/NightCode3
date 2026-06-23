@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   enableBatching()
   try {
     const body = await req.json()
-    const { messages, messageId, chatId, model, provider: rawProvider, skillInjected } = body
+    const { messages, messageId, chatId, model, provider: rawProvider, skillInjected, mode } = body
 
     console.log("API route received messages:", messages?.length ?? 0, "messages")
     messages?.forEach((m: any, i: number) => console.log(`  msg[${i}] role=${m.role} (${m.content?.length ?? 0} chars)`))
@@ -136,7 +136,8 @@ export async function POST(req: Request) {
             body.skillInjected,
             mcpTools,
             toolIsolation,
-            compactionService
+            compactionService,
+            { mode: mode === "caat" ? "caat" : "standard" }
           )
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Engine error"

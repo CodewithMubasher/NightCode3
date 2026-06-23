@@ -30,6 +30,8 @@ interface NightCodeState {
   isPreviewOpen: boolean
   openPreview: (path: string) => void
   closePreview: () => void
+  statusMessage: string | null
+  setStatusMessage: (msg: string | null) => void
 
   createChat: (model?: string, provider?: string, projectId?: string) => string
   deleteChat: (id: string) => void
@@ -77,6 +79,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       isStreaming: false,
       previewFilePath: null,
       isPreviewOpen: false,
+      statusMessage: null,
       askData: null,
       pendingConfirmation: null,
       settings: {
@@ -346,6 +349,22 @@ export const useNightCodeStore = create<NightCodeState>()(
 
         console.log('User message:', content)
         console.log('Skills detected:', skills)
+
+        // ── Auto-detect frontend-design skill ──────────────────────────────
+        const designKeywords = [
+          "design", "ui", "ux", "frontend", "style", "css", "html",
+          "landing page", "login page", "website", "app", "interface",
+          "beautiful", "modern", "animation", "gradient", "typography",
+          "shadcn", "lucide", "component", "layout", "responsive",
+        ]
+        const msg = content.toLowerCase()
+        if (
+          !skills?.includes("frontend-design") &&
+          designKeywords.some((k) => msg.includes(k))
+        ) {
+          skills = [...(skills ?? []), "frontend-design"]
+          console.log('Auto-activated frontend-design skill')
+        }
 
         const skillStates: ToolState[] = []
         let skillInjected = ""
@@ -699,6 +718,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       clearAll: () => set({ chats: [], activeChatId: null }),
       openPreview: (path) => set({ previewFilePath: path, isPreviewOpen: true }),
       closePreview: () => set({ isPreviewOpen: false, previewFilePath: null }),
+      setStatusMessage: (msg) => set({ statusMessage: msg }),
     }),
     {
       name: "nightcode-store",

@@ -2,7 +2,7 @@ import type { Message, AIProvider } from "@/types"
 import * as fs from "fs"
 import * as path from "path"
 import { EventEmitter } from "./event-emitter"
-import { AGENT_CONFIG, type ModeConfig } from "./modes"
+import { AGENT_CONFIG, CAAT_CONFIG, type ModeConfig } from "./modes"
 import { buildSystemPrompt, buildContext, buildRequest, buildDynamicBlock, invalidateCompactionCache } from "./context-builder"
 import { planStep, type UsageInfo } from "./planner"
 import { flushBatch } from "@/lib/db/batch"
@@ -15,6 +15,8 @@ import { CompactionService } from "./compaction-service"
 import { Semaphore } from "./semaphore"
 import { createStep, createFileSnapshot } from "@/lib/db/adapter"
 import type { DBFileSnapshot } from "@/lib/db/types"
+import { boundToolOutput } from "./tool-output-store"
+import { DoomLoopTracker } from "./doom-loop-tracker"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -42,6 +44,7 @@ export interface EngineRunOptions {
   depth?: number
   silent?: boolean
   tools?: string[]
+  mode?: "standard" | "caat"
 }
 
 export class NightCodeEngine {
@@ -113,9 +116,10 @@ export class NightCodeEngine {
     compactionService?: CompactionService,
     options?: EngineRunOptions
   ): Promise<string> {
-    const config: ModeConfig = AGENT_CONFIG
+    const mode = options?.mode ?? "standard"
+    const config: ModeConfig = mode === "caat" ? CAAT_CONFIG : AGENT_CONFIG
 
-    const basePrompt = buildSystemPrompt(mcpTools)
+    const basePrompt = buildSystemPrompt(mode, mcpTools, model)
     const fullSystemPrompt = skillInjected
       ? basePrompt + "\n\n" + skillInjected
       : basePrompt
@@ -131,10 +135,10 @@ export class NightCodeEngine {
       .map((t) => TOOL_REGISTRY[t.name])
       .filter(Boolean)
 
-    // Add delegate_task for orchestrator (not sub-agents)
-    const delegateTaskTool = TOOL_REGISTRY["delegate_task"]
-    if (delegateTaskTool && (!options?.depth || options.depth < 1)) {
-      availableTools = [...availableTools, delegateTaskTool]
+    // Add expert_agent for orchestrator (spawns CaaT sub-agent)
+    const expertAgentToolRef = TOOL_REGISTRY["expert_agent"]
+    if (expertAgentToolRef && (!options?.depth || options.depth < 1)) {
+      availableTools = [...availableTools, expertAgentToolRef]
     }
 
     if (mcpTools) {
@@ -240,6 +244,8 @@ export class NightCodeEngine {
         let roundFailed = 0
         let roundTotal = 0
 
+        const doomLoopTracker = new DoomLoopTracker()
+
         // Map tool calls with pre-assigned IDs and resolve tool definitions
         const normalize = (n: string) => n.replace(/-/g, "_").toLowerCase()
         const toolAliases: Record<string, string> = {
@@ -256,11 +262,13 @@ export class NightCodeEngine {
           toolCallCount++
           const resolvedName = toolAliases[tc.toolName] ?? tc.toolName
           const toolDef = availableTools.find((t) => normalize(t.name) === normalize(resolvedName))
-          const generatedId = toolIsolation?.onToolStart(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
+          // State: pending (tool call registered but not yet executing)
+          const generatedId = toolIsolation?.registerToolCall(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
           let args = tc.args
-          if (resolvedName === "delegate_task") {
-            args = { ...args, __provider: provider, __model: model, __depth: options?.depth ?? 0, __abortSignal: signal }
+          if (resolvedName === "expert_agent") {
+            args = { ...args, __emitEvent: this.emitEvent.bind(this), __abortSignal: signal }
           }
+          doomLoopTracker.record(tc.toolName, tc.args)
           return { ...tc, toolDef, generatedId, args, resolvedName }
         })
 
@@ -284,14 +292,32 @@ export class NightCodeEngine {
 
         const validCalls = calls.filter((tc) => tc.toolDef)
 
-        // Emit all tool_start events immediately
+        // State: pending → emit pending events for all valid calls
         for (const tc of validCalls) {
-          this.emitEvent("tool_start", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
+          this.emitEvent("tool_pending", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
+        }
+
+        // State: pending → running for all valid calls
+        for (const tc of validCalls) {
+          toolIsolation?.markRunning(tc.generatedId, tc.toolName)
+          this.emitEvent("tool_running", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
         }
 
         // Execute all valid tools in parallel (bounded to 5 concurrent)
         const execResults = await Promise.all(
           validCalls.map((tc) => toolSem.run(async () => {
+            // Doom loop check — 3 consecutive identical tool+args
+            const doomCheck = doomLoopTracker.check(tc.toolName, tc.args)
+            if (doomCheck.isDoomLoop) {
+              return {
+                tc,
+                skipResult: false,
+                success: false,
+                forcedThink: false,
+                error: `Doom loop detected: tool "${tc.toolName}" called with identical arguments ${doomCheck.matchedCount + 1} times. Use a different approach.`,
+              } as const
+            }
+
             if (tc.toolName === "ask") {
               asked = true
               try {
@@ -341,7 +367,7 @@ export class NightCodeEngine {
           }))
         )
 
-        // Process all results
+        // Process all results — state: running → completed | error
         for (const result of execResults) {
           const { tc, skipResult } = result
 
@@ -368,14 +394,13 @@ export class NightCodeEngine {
           if (!result.success) {
             roundFailed++
             roundTotal++
-            this.emitEvent("tool_end", {
+            this.emitEvent("tool_error", {
               tool: tc.toolName,
               args: tc.args,
-              status: "error",
               error: result.error,
               toolCallId: tc.generatedId,
             })
-            toolIsolation?.onToolEnd(tc.generatedId, tc.toolName, false, null, result.error ?? "Tool execution failed", null, undefined)
+            toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, result.error ?? "Tool execution failed", null, undefined)
             toolResultMessages.push({
               role: "tool",
               content: [{
@@ -416,10 +441,9 @@ export class NightCodeEngine {
               }
             }
 
-            this.emitEvent("tool_end", {
+            this.emitEvent("tool_completed", {
               tool: tc.toolName,
               args: tc.args,
-              status: "verified",
               result: result.data,
               evidence: verification.evidence,
               callNumber: toolCallCount,
@@ -427,8 +451,8 @@ export class NightCodeEngine {
             })
 
             const toolResult = toolIsolation
-              ? toolIsolation.onToolEnd(tc.generatedId, tc.toolName, true, result.data, null, (result as any).executionTime ?? null, verification.evidence)
-              : result.data
+              ? toolIsolation.completeTool(tc.generatedId, tc.toolName, true, result.data, null, (result as any).executionTime ?? null, verification.evidence)
+              : boundToolOutput(tc.generatedId, result.data)
 
             toolResultMessages.push({
               role: "tool",
@@ -444,14 +468,13 @@ export class NightCodeEngine {
           } else {
             roundFailed++
             roundTotal++
-            this.emitEvent("tool_end", {
+            this.emitEvent("tool_error", {
               tool: tc.toolName,
               args: tc.args,
-              status: "verification_failed",
-              discrepancy: verification.discrepancy,
+              error: `Verification failed: ${verification.discrepancy}`,
               toolCallId: tc.generatedId,
             })
-            toolIsolation?.onToolEnd(tc.generatedId, tc.toolName, false, null, `Verification failed: ${verification.discrepancy}`, null, undefined)
+            toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, `Verification failed: ${verification.discrepancy}`, null, undefined)
             toolResultMessages.push({
               role: "tool",
               content: [{

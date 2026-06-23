@@ -19,7 +19,7 @@ import { toast } from "sonner"
 
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)/)
-  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task"].includes(toolName)) {
+  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent"].includes(toolName)) {
     return Cable
   }
   switch (toolName) {
@@ -35,6 +35,7 @@ function toolIcon(toolName: string) {
     case "create_folder": return FolderCheck
     case "skill": return BookOpen
     case "delegate_task": return Bot
+    case "expert_agent": return Bot
     default: return Circle
   }
 }
@@ -54,6 +55,8 @@ function toolArgs(toolState: ToolState): string | null {
   if (prompt) return prompt.length > 40 ? prompt.slice(0, 40) + "..." : prompt
   const focus = toolState.args?.focus as string | undefined
   if (focus && toolState.tool === "delegate_task") return focus
+  const task = toolState.args?.task as string | undefined
+  if (task && toolState.tool === "expert_agent") return task.length > 60 ? task.slice(0, 60) + "..." : task
   return null
 }
 
@@ -116,7 +119,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   const textColor = isFailed ? "#EF4444" : "#E0E0E0"
 
   const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
-  const isDelegate = toolState.tool === "delegate_task"
+  const isDelegate = toolState.tool === "delegate_task" || toolState.tool === "expert_agent"
 
   const toolLabels: Record<string, (a: string | null) => string> = {
     write_file: () => "Created",
@@ -133,6 +136,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     think: () => "Thinking",
     skill: () => "Read skill",
     delegate_task: () => "Sub-agent",
+    expert_agent: () => "Expert Agent",
   }
   const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
 
@@ -335,7 +339,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           )}
 
           <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-3 text-foreground tracking-wider"
-               style={{ fontFamily: "var(--font-message)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
+               style={{ fontFamily: "var(--font-sans)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
             <p>{message.content}</p>
           </div>
         </div>
@@ -407,7 +411,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
           {message.content && (
             <div className="prose prose-invert max-w-none w-full min-w-0 mt-1 tracking-wider"
-                 style={{ fontFamily: "var(--font-message)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
+                 style={{ fontFamily: "var(--font-sans)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
               {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}
             </div>
           )}
