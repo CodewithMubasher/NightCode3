@@ -197,6 +197,9 @@ export class NightCodeEngine {
             onText: (text) => {
               this.emitEvent("text_delta", { text })
             },
+            onReasoning: (text) => {
+              this.emitEvent("reasoning_delta", { text })
+            },
           },
           signal,
           requestSystemPrompt
@@ -233,7 +236,7 @@ export class NightCodeEngine {
           finalText = step.content
 
           console.log(`[engine] Done. ${toolCallCount} total tool calls across ${stepNumber} steps. Final text length: ${finalText.length}`)
-          this.emitEvent("thinking", { text: finalText, toolCallCount })
+          this.emitEvent("thinking", { text: finalText, reasoning: step.reasoning ?? "", toolCallCount })
           compactionService?.onStepComplete(stepNumber, provider, model)
           break
         }

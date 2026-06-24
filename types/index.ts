@@ -36,6 +36,7 @@ export interface Message {
   id: string
   role: "user" | "assistant" | "system"
   content: string
+  reasoning?: string
   toolStates: Record<string, ToolState>
   artifacts: Artifact[]
   status: MessageStatus

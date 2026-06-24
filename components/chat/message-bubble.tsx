@@ -5,7 +5,7 @@ import type { Message, ToolState } from "@/types"
 import {
   Copy, Check, ThumbsUp, ThumbsDown, Eclipse, RotateCcw,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
-  FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot,
+  FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot, Brain,
 } from "lucide-react"
 import {
   Attachments,
@@ -204,12 +204,61 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   )
 }
 
+function ReasoningNode({ text }: { text: string }) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div className="relative flex flex-col gap-1 pb-2">
+      <div className="flex items-center gap-1.5">
+        <div
+          className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background"
+          style={{ width: 22, height: 22 }}
+        >
+          <Brain className="size-3.5" style={{ color: "#B3B3B3" }} />
+        </div>
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <span className="text-[14px] font-sans" style={{ color: "#B3B3B3" }}>
+            Reasoning
+          </span>
+          <ChevronDown
+            size={12}
+            style={{
+              color: "#B3B3B3",
+              transition: "transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)",
+              transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+            }}
+          />
+        </button>
+      </div>
+      <div
+        style={{
+          maxHeight: open ? "none" : "0px",
+          overflow: "hidden",
+          transition: open ? "none" : "max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)",
+          opacity: open ? 1 : 0,
+        }}
+      >
+        <div className="ml-7">
+          <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-[13px] leading-relaxed text-[#ccc] whitespace-pre-wrap">
+            {text}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Timeline({ toolStates, message }: { toolStates: Record<string, ToolState>; message: Message }) {
   const entries = Object.values(toolStates)
-  if (entries.length === 0) return null
+  const hasReasoning = message.reasoning && message.reasoning.length > 0
+  if (entries.length === 0 && !hasReasoning) return null
 
   const stagger = 150
-  const lineDelay = entries.length * stagger + 200
+  const totalItems = entries.length + (hasReasoning ? 1 : 0)
+  const lineDelay = totalItems * stagger + 200
 
   return (
     <div className="relative py-2">
@@ -224,6 +273,19 @@ function Timeline({ toolStates, message }: { toolStates: Record<string, ToolStat
         }}
       />
       <div className="relative space-y-0" style={{ zIndex: 1 }}>
+        {hasReasoning && (
+          <div
+            className="pb-2"
+            style={{
+              opacity: 0,
+              transform: "translateY(15px)",
+              animation: "cinematic-step-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+              animationDelay: "0ms",
+            }}
+          >
+            <ReasoningNode text={message.reasoning!} />
+          </div>
+        )}
         {entries.map((ts, i) => (
           <div
             key={ts.id}
@@ -232,10 +294,10 @@ function Timeline({ toolStates, message }: { toolStates: Record<string, ToolStat
               opacity: 0,
               transform: "translateY(15px)",
               animation: "cinematic-step-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards",
-              animationDelay: `${i * stagger}ms`,
+              animationDelay: `${(i + (hasReasoning ? 1 : 0)) * stagger}ms`,
             }}
           >
-            <ToolTimelineItem toolState={ts} iconDelay={i * stagger + 60} />
+            <ToolTimelineItem toolState={ts} iconDelay={(i + (hasReasoning ? 1 : 0)) * stagger + 60} />
           </div>
         ))}
         {message.status !== "streaming" && (
@@ -245,7 +307,7 @@ function Timeline({ toolStates, message }: { toolStates: Record<string, ToolStat
               opacity: 0,
               transform: "translateY(10px)",
               animation: "cinematic-step-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards",
-              animationDelay: `${entries.length * stagger + 100}ms`,
+              animationDelay: `${totalItems * stagger + 100}ms`,
             }}
           >
             <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
@@ -273,6 +335,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const rollbackStore = useNightCodeStore((s) => s.rollbackToMessage)
   const activeChatId = useNightCodeStore((s) => s.activeChatId)
 
+
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content).catch(() => {})
     setCopied(true)
@@ -297,29 +360,35 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       setRollingBack(false)
     }
   }
+  const hasReasoning = !!(message.reasoning && message.reasoning.length > 0)
   const isStreamingTool = message.status === "streaming" && toolCount > 0
-  const [expanded, setExpanded] = useState(isStreamingTool)
+  const isStreamingReasoning = message.status === "streaming" && hasReasoning
+  const [expanded, setExpanded] = useState(isStreamingTool || isStreamingReasoning)
   const timelineRef = useRef<HTMLDivElement>(null)
   const [contentHeight, setContentHeight] = useState(0)
 
   useEffect(() => {
-    if (isStreamingTool) setExpanded(true)
-  }, [isStreamingTool])
+    if (isStreamingTool || isStreamingReasoning) setExpanded(true)
+  }, [isStreamingTool, isStreamingReasoning])
 
   useLayoutEffect(() => {
     if (timelineRef.current) {
       setContentHeight(timelineRef.current.scrollHeight)
     }
-  }, [message.toolStates])
+  }, [message.toolStates, message.reasoning])
 
   useLayoutEffect(() => {
     const el = timelineRef.current
     if (!el) return
+    let mounted = true
     const ro = new ResizeObserver(() => {
-      setContentHeight(el.scrollHeight)
+      if (mounted) setContentHeight(el.scrollHeight)
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      mounted = false
+      ro.disconnect()
+    }
   }, [])
 
   if (message.role === "user") {
@@ -338,9 +407,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
 
-          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-3 text-foreground tracking-wider"
-               style={{ fontFamily: "var(--font-sans)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
-            <p>{message.content}</p>
+          <div className="rounded-2xl rounded-tr-sm bg-muted px-4 py-3 text-foreground text-base leading-relaxed">
+            <div className="break-words whitespace-pre-wrap">
+              {message.content}
+            </div>
           </div>
         </div>
       </div>
@@ -364,22 +434,23 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <Eclipse size={24} style={{ color: "var(--primary-color)" }} className={message.status === "streaming" ? "animate-spin" : ""} />
         </div>
         <div className="min-w-0 flex-1 pt-1.5">
-          {toolCount > 0 && (
+          {(toolCount > 0 || hasReasoning) && (
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-1.5 py-1 text-sm font-sans text-[#B3B3B3] hover:text-white transition-colors duration-150"
             >
-              Activities ({toolCount})
+              Activities ({toolCount + (hasReasoning ? 1 : 0)})
               <ChevronDown
                 size={14}
                 style={{
+                  color: "#B3B3B3",
                   transition: "transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)",
                   transform: expanded ? "rotate(0deg)" : "rotate(-90deg)",
                 }}
               />
             </button>
           )}
-          {message.status === "streaming" && toolCount === 0 && !message.content && (
+          {message.status === "streaming" && toolCount === 0 && !message.content && !hasReasoning && (
             <div className="flex items-center gap-1.5 py-1">
               <span
                 className="text-sm font-sans"
@@ -398,9 +469,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
           <div
             style={{
+              maxHeight: expanded ? "none" : "0px",
               overflow: "hidden",
-              transition: `max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)`,
-              maxHeight: expanded ? `${contentHeight}px` : "0px",
+              transition: (isStreamingTool || isStreamingReasoning)
+                ? "none"
+                : "max-height 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)",
               opacity: expanded ? 1 : 0,
             }}
           >
@@ -410,9 +483,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
 
           {message.content && (
-            <div className="prose prose-invert max-w-none w-full min-w-0 mt-1 tracking-wider"
-                 style={{ fontFamily: "var(--font-sans)", fontWeight: 400, fontSize: 17, lineHeight: "24px", color: "rgb(227, 227, 227)" }}>
-              {message.status === "streaming" ? message.content : renderInlineMarkdown(message.content)}
+            <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
+              {renderInlineMarkdown(message.content)}
             </div>
           )}
           {message.status === "interrupted" && (

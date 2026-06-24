@@ -1,8 +1,72 @@
 import { useState, type ReactNode } from "react"
 import { Copy } from "lucide-react"
+import katex from "katex"
+import "katex/dist/katex.min.css"
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function renderMathBlock(mathStr: string, key: string): ReactNode {
+  try {
+    const html = katex.renderToString(mathStr.trim(), {
+      displayMode: true,
+      throwOnError: false,
+      output: "html",
+      trust: true,
+      // These macros let \text, \begin{align}, &=, \\ all work correctly
+      macros: {
+        "\\R": "\\mathbb{R}",
+        "\\N": "\\mathbb{N}",
+        "\\Z": "\\mathbb{Z}",
+      },
+    })
+    return (
+      <div
+        key={key}
+        className="my-4 overflow-x-auto rounded-md py-3 text-center"
+        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  } catch {
+    return (
+      <pre
+        key={key}
+        className="my-2 rounded bg-white/5 px-3 py-2 text-sm font-mono text-white/60 overflow-x-auto"
+      >
+        {mathStr}
+      </pre>
+    )
+  }
+}
+
+function renderInlineMath(mathStr: string, key: number): ReactNode {
+  try {
+    const html = katex.renderToString(mathStr, {
+      displayMode: false,
+      throwOnError: false,
+      output: "html",
+      trust: true,
+    })
+    return (
+      <span
+        key={key}
+        dangerouslySetInnerHTML={{ __html: html }}
+        className="inline-math mx-0.5"
+      />
+    )
+  } catch {
+    return <span key={key}>${mathStr}$</span>
+  }
+}
+
+function normalizeLatex(s: string): string {
+  return s
+    .replace(/\\\\\[/g, "\\[")
+    .replace(/\\\\\]/g, "\\]")
+}
 
 function normalizeMarkdown(raw: string): string {
-  let s = raw
+  let s = normalizeLatex(raw)
 
   // 1. Inject newline before any heading not already at line start
   s = s.replace(/([^\n])(#{1,3}\s)/g, "$1\n$2")
@@ -19,6 +83,8 @@ function normalizeMarkdown(raw: string): string {
   return s
 }
 
+// ── Main renderer ──────────────────────────────────────────────────────────
+
 export function renderInlineMarkdown(content: string): ReactNode {
   const lines = normalizeMarkdown(content).split("\n")
   const elements: ReactNode[] = []
@@ -30,8 +96,11 @@ export function renderInlineMarkdown(content: string): ReactNode {
     const line = lines[i]
     const trimmed = line.trim()
 
-    // ── Split hybrid heading+table lines (e.g. "### Files| Col | Col |") ─
-    if ((trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) && trimmed.includes("|")) {
+    // ── Split hybrid heading+table lines ────────────────────────────────
+    if (
+      (trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) &&
+      trimmed.includes("|")
+    ) {
       const pipeIndex = trimmed.indexOf("|")
       const headingPart = trimmed.slice(0, pipeIndex).trim()
       const tablePart = trimmed.slice(pipeIndex)
@@ -40,7 +109,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Drop orphaned separator rows ─────────────────────────────────────
+    // ── Drop orphaned separator rows ────────────────────────────────────
     if (/^\|[\s|:\-]+\|$/.test(trimmed)) continue
 
     // ── Code fence ──────────────────────────────────────────────────────
@@ -64,11 +133,99 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Horizontal rule  (---, ***, ___) ───────────────────────────────
+    // ── Block math: $$ on its own line (opening fence) ──────────────────
+    // Handles:
+    //   $$              ← opening line alone
+    //   \text{LHS} &= 2x + 5 \\
+    //   \text{RHS} &= x + 7
+    //   $$              ← closing line alone
+    if (trimmed === "$$") {
+      let mathContent = ""
+      let j = i + 1
+      while (j < lines.length && lines[j].trim() !== "$$") {
+        mathContent += (mathContent ? "\n" : "") + lines[j]
+        j++
+      }
+      elements.push(renderMathBlock(mathContent, `math-fence-${i}`))
+      i = j // skip past closing $$
+      continue
+    }
+
+    // ── Block math: $$...$$ on a single line ────────────────────────────
+    if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length > 4) {
+      const mathStr = trimmed.slice(2, -2).trim()
+      elements.push(renderMathBlock(mathStr, `math-single-${i}`))
+      continue
+    }
+
+    // ── Block math: $$ ... (opening, content on same line, no closing) ──
+    // Handles: $$\text{LHS} &= 2x + 5 \\   (opening $$ with content)
+    if (trimmed.startsWith("$$") && !trimmed.endsWith("$$")) {
+      let mathContent = trimmed.slice(2).trim()
+      let j = i + 1
+      while (j < lines.length) {
+        const jt = lines[j].trim()
+        if (jt === "$$" || jt.endsWith("$$")) {
+          if (jt !== "$$") {
+            mathContent += "\n" + jt.slice(0, jt.endsWith("$$") ? -2 : undefined).trim()
+          }
+          break
+        }
+        mathContent += "\n" + lines[j]
+        j++
+      }
+      elements.push(renderMathBlock(mathContent, `math-inline-open-${i}`))
+      i = j
+      continue
+    }
+
+    // ── Block math: \[...\] single line ────────────────────────────────
+    if (trimmed.startsWith("\\[") && trimmed.endsWith("\\]")) {
+      const mathStr = trimmed.slice(2, -2).trim()
+      elements.push(renderMathBlock(mathStr, `math-bracket-single-${i}`))
+      continue
+    }
+
+    // ── Block math: \[ multiline \] ─────────────────────────────────────
+    if (trimmed.startsWith("\\[") && !trimmed.endsWith("\\]")) {
+      let mathContent = trimmed.slice(2)
+      let j = i + 1
+      while (j < lines.length && !lines[j].trim().endsWith("\\]")) {
+        mathContent += "\n" + lines[j]
+        j++
+      }
+      if (j < lines.length) {
+        mathContent += "\n" + lines[j].trim().slice(0, -2)
+      }
+      elements.push(renderMathBlock(mathContent, `math-bracket-ml-${i}`))
+      i = j
+      continue
+    }
+
+    // ── Block math: \begin{...} environments ────────────────────────────
+    // Handles \begin{align}, \begin{aligned}, \begin{equation}, \begin{matrix}, etc.
+    if (/^\\begin\{/.test(trimmed)) {
+      // Extract environment name
+      const envMatch = trimmed.match(/^\\begin\{([^}]+)\}/)
+      const envName = envMatch ? envMatch[1] : ""
+      let mathContent = trimmed
+      let j = i + 1
+      const endToken = `\\end{${envName}}`
+      while (j < lines.length && !lines[j].trim().includes(endToken)) {
+        mathContent += "\n" + lines[j]
+        j++
+      }
+      if (j < lines.length) {
+        mathContent += "\n" + lines[j]
+      }
+      elements.push(renderMathBlock(mathContent, `math-env-${i}`))
+      i = j
+      continue
+    }
+
+    // ── Horizontal rule ─────────────────────────────────────────────────
     if (/^(\*{3,}|-{3,}|_{3,})\s*$/.test(trimmed)) {
-      elements.push(
-        <hr key={`hr-${i}`} className="my-3 border-0 border-t border-white/10" />
-      )
+      elements.push(<hr key={`hr-${i}`} className="my-3 border-0 border-t border-white/10" />)
       continue
     }
 
@@ -78,7 +235,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Drop bare # / ## / ### with no text (LLM artifacts) ─────────────
+    // ── Drop bare # / ## / ### with no text ─────────────────────────────
     if (/^#{1,3}$/.test(trimmed)) continue
 
     // ── Headings ─────────────────────────────────────────────────────────
@@ -90,7 +247,6 @@ export function renderInlineMarkdown(content: string): ReactNode {
       )
       continue
     }
-
     if (trimmed.startsWith("## ")) {
       elements.push(
         <h2 key={`h2-${i}`} className="mb-1 mt-5 text-[17px] font-semibold text-white/90">
@@ -99,7 +255,6 @@ export function renderInlineMarkdown(content: string): ReactNode {
       )
       continue
     }
-
     if (trimmed.startsWith("# ")) {
       elements.push(
         <h1 key={`h1-${i}`} className="mb-1 mt-5 text-[19px] font-bold text-white">
@@ -109,22 +264,42 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Unordered list ───────────────────────────────────────────────────
+    // ── Unordered list (with sub-item support) ───────────────────────────
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      const items: string[] = [trimmed.slice(2)]
+      type ListItem = { text: string; children: string[] }
+      const items: ListItem[] = [{ text: trimmed.slice(2), children: [] }]
       let j = i + 1
-      while (
-        j < lines.length &&
-        (lines[j].trim().startsWith("- ") || lines[j].trim().startsWith("* "))
-      ) {
-        items.push(lines[j].trim().slice(2))
-        j++
+
+      while (j < lines.length) {
+        const nextLine = lines[j]
+        const nextTrimmed = nextLine.trimStart()
+        const indent = nextLine.length - nextTrimmed.length
+
+        if (indent >= 2 && (nextTrimmed.startsWith("- ") || nextTrimmed.startsWith("* "))) {
+          if (items.length > 0) items[items.length - 1].children.push(nextTrimmed.slice(2))
+          j++
+        } else if (nextTrimmed.startsWith("- ") || nextTrimmed.startsWith("* ")) {
+          items.push({ text: nextTrimmed.slice(2), children: [] })
+          j++
+        } else {
+          break
+        }
       }
+
       elements.push(
         <ul key={`ul-${i}`} className="mb-2 mt-1 list-disc pl-5 space-y-1">
           {items.map((item, k) => (
             <li key={k} className="text-[15px] leading-relaxed">
-              {renderInline(item)}
+              {renderInline(item.text)}
+              {item.children.length > 0 && (
+                <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                  {item.children.map((child, l) => (
+                    <li key={l} className="text-[14px] leading-relaxed text-white/70">
+                      {renderInline(child)}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>
@@ -176,7 +351,6 @@ export function renderInlineMarkdown(content: string): ReactNode {
         lines[j].trim().startsWith("|") &&
         lines[j].trim().endsWith("|")
       ) {
-        // skip separator rows like |---|---|
         if (!/^\|[\s|:\-]+\|$/.test(lines[j].trim())) {
           rows.push(
             lines[j]
@@ -227,16 +401,62 @@ export function renderInlineMarkdown(content: string): ReactNode {
     )
   }
 
+  // Flush unclosed code block (stream interrupted mid-fence)
+  if (inCodeBlock && codeBlockContent) {
+    elements.push(
+      <CodeBlock
+        key={`code-unclosed-${elements.length}`}
+        content={codeBlockContent}
+        lang={codeBlockLang}
+      />
+    )
+  }
+
   return elements
 }
 
-// ── Inline parser (bold, italic, code, links) ─────────────────────────────
+// ── Inline parser ──────────────────────────────────────────────────────────
+
 function renderInline(line: string): ReactNode {
   const parts: ReactNode[] = []
   let remaining = line
   let key = 0
 
   while (remaining.length > 0) {
+
+    // Inline $$...$$ — render as display math inline (avoids raw $$ leaking into paragraph)
+    if (remaining.startsWith("$$")) {
+      const ddMatch = remaining.match(/^\$\$([^$]*?)\$\$/)
+      if (ddMatch) {
+        parts.push(renderInlineMath(ddMatch[1].trim(), key++))
+        remaining = remaining.slice(ddMatch[0].length)
+        continue
+      }
+      // Unclosed $$ — emit both chars as plain text to avoid garbling
+      parts.push("$$")
+      remaining = remaining.slice(2)
+      continue
+    }
+
+    // Inline math  $...$  (single dollar, not $$)
+    // Guard: make sure it's not $$ by checking next char
+    if (remaining.startsWith("$") && !remaining.startsWith("$$")) {
+      const dollarMathMatch = remaining.match(/^\$([^$\n]+?)\$/)
+      if (dollarMathMatch) {
+        parts.push(renderInlineMath(dollarMathMatch[1], key++))
+        remaining = remaining.slice(dollarMathMatch[0].length)
+        continue
+      }
+    }
+
+    // Inline math  \(...\)
+    const inlineMathMatch = remaining.match(/^\\\((.+?)\\\)/)
+    if (inlineMathMatch) {
+      parts.push(renderInlineMath(inlineMathMatch[1], key++))
+      remaining = remaining.slice(inlineMathMatch[0].length)
+      continue
+    }
+
     // Inline code  `code`
     const codeMatch = remaining.match(/^`([^`]+)`/)
     if (codeMatch) {
@@ -258,7 +478,7 @@ function renderInline(line: string): ReactNode {
     }
 
     // Bold  **text**
-    const boldMatch = remaining.match(/^\*\*(.+?)\*\*/)
+    const boldMatch = remaining.match(/^\*\*([^*]+?)\*\*/)
     if (boldMatch) {
       parts.push(
         <strong key={key++} className="font-semibold text-white">
@@ -276,7 +496,7 @@ function renderInline(line: string): ReactNode {
       remaining = remaining.slice(italicStarMatch[0].length)
       continue
     }
-    const italicUnderMatch = remaining.match(/^_(.+?)_/)
+    const italicUnderMatch = remaining.match(/^_([^_]+?)_/)
     if (italicUnderMatch) {
       parts.push(<em key={key++}>{italicUnderMatch[1]}</em>)
       remaining = remaining.slice(italicUnderMatch[0].length)
@@ -369,7 +589,6 @@ function CodeBlock({ content, lang }: { content: string; lang?: string }) {
 
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-white/[0.08]">
-      {/* Header — flush, no gap */}
       <div
         className="flex items-center justify-between px-3 py-1.5"
         style={{ background: "#1A1A1A", borderBottom: "1px solid rgba(255,255,255,0.07)" }}
@@ -391,8 +610,6 @@ function CodeBlock({ content, lang }: { content: string; lang?: string }) {
           )}
         </button>
       </div>
-
-      {/* Body — same bg, no visual gap */}
       <pre
         className="overflow-x-auto p-3 text-[13.5px] font-mono leading-relaxed"
         style={{ background: "#141414", margin: 0, scrollbarWidth: "none", msOverflowStyle: "none" }}

@@ -16,6 +16,10 @@ function emptyMessage(id: string, role: "user" | "assistant", status: MessageSta
   return { id, role, content: "", toolStates: {}, artifacts: [], status, hasError: false, attachments }
 }
 
+function emptyAssistantMessage(id: string): Message {
+  return { id, role: "assistant", content: "", reasoning: "", toolStates: {}, artifacts: [], status: "streaming", hasError: false }
+}
+
 interface NightCodeState {
   chats: Chat[]
   activeChatId: string | null
@@ -45,6 +49,9 @@ interface NightCodeState {
 
   addMessage: (chatId: string, message: Message) => void
   updateMessageContent: (chatId: string, messageId: string, content: string) => void
+  setMessageContent: (chatId: string, messageId: string, content: string) => void
+  updateMessageReasoning: (chatId: string, messageId: string, text: string) => void
+  setMessageReasoning: (chatId: string, messageId: string, text: string) => void
   updateToolState: (chatId: string, messageId: string, toolState: ToolState) => void
   updateMessageStatus: (chatId: string, messageId: string, status: MessageStatus) => void
   setMessageError: (chatId: string, messageId: string, error: boolean) => void
@@ -154,8 +161,63 @@ export const useNightCodeStore = create<NightCodeState>()(
                   ...c,
                   messages: c.messages.map((m) => {
                     if (m.id === messageId) {
-                      const sanitized = (m.content + content).replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+                      const sanitized = (m.content + content).replace(/<think>[\s\S]*?<\/think>/g, "")
                       return { ...m, content: sanitized }
+                    }
+                    return m
+                  }),
+                  updatedAt: Date.now(),
+                }
+              : c
+          ),
+        }))
+      },
+      setMessageContent: (chatId, messageId, content) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === messageId) {
+                      const sanitized = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+                      return { ...m, content: sanitized }
+                    }
+                    return m
+                  }),
+                  updatedAt: Date.now(),
+                }
+              : c
+          ),
+        }))
+      },
+      updateMessageReasoning: (chatId, messageId, text) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === messageId) {
+                      return { ...m, reasoning: (m.reasoning ?? "") + text }
+                    }
+                    return m
+                  }),
+                  updatedAt: Date.now(),
+                }
+              : c
+          ),
+        }))
+      },
+      setMessageReasoning: (chatId, messageId, text) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id === messageId) {
+                      return { ...m, reasoning: text }
                     }
                     return m
                   }),
@@ -392,7 +454,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         const userMessage = emptyMessage(generateId(), "user", "complete", attachments)
         userMessage.content = content
 
-        const assistantMessage = emptyMessage(generateId(), "assistant", "streaming")
+        const assistantMessage = emptyAssistantMessage(generateId())
         for (const ss of skillStates) {
           assistantMessage.toolStates[ss.id] = ss
         }
@@ -467,9 +529,30 @@ export const useNightCodeStore = create<NightCodeState>()(
                 }
 
                 switch (parsed.type) {
+                  case "text_delta": {
+                    const text = (parsed.payload?.text as string) ?? ""
+                    if (text) {
+                      if (typeof window !== "undefined") {
+                        window.dispatchEvent(
+                          new CustomEvent("nc:token", {
+                            detail: { messageId: assistantMessage.id, text },
+                          })
+                        )
+                      }
+                      get().updateMessageContent(chatId, assistantMessage.id, text)
+                    }
+                    break
+                  }
+                  case "reasoning_delta": {
+                    const rText = (parsed.payload?.text as string) ?? ""
+                    if (rText) get().updateMessageReasoning(chatId, assistantMessage.id, rText)
+                    break
+                  }
                   case "thinking": {
                     const text = (parsed.payload?.text as string) ?? ""
-                    if (text) get().updateMessageContent(chatId, assistantMessage.id, text)
+                    if (text) get().setMessageContent(chatId, assistantMessage.id, text)
+                    const reasoning = (parsed.payload?.reasoning as string) ?? ""
+                    if (reasoning) get().setMessageReasoning(chatId, assistantMessage.id, reasoning)
                     break
                   }
                   case "tool_start": {

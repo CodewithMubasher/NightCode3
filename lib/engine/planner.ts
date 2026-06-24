@@ -140,11 +140,12 @@ export interface UsageInfo {
 }
 
 export type StepResult =
-  | { type: "text"; content: string; usage?: UsageInfo }
-  | { type: "tool_calls"; text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage?: UsageInfo }
+  | { type: "text"; content: string; reasoning?: string; usage?: UsageInfo }
+  | { type: "tool_calls"; text: string; reasoning?: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage?: UsageInfo }
 
 export type PlannerCallbacks = {
   onText?: (text: string) => void
+  onReasoning?: (text: string) => void
 }
 
 function getTemperature(modelId: string): number | undefined {
@@ -267,7 +268,7 @@ export async function planStep(
   async function doStreamText(
     messages: Array<{ role: string; content: unknown }>,
     tools: Record<string, unknown> | undefined
-  ): Promise<{ text: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage: UsageInfo | undefined }> {
+  ): Promise<{ text: string; reasoning: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage: UsageInfo | undefined }> {
     const repairAliases: Record<string, string> = {
       create_file: "write_file",
       make_file: "write_file",
@@ -291,6 +292,9 @@ export async function planStep(
         if (chunk.type === "text-delta" && callbacks.onText) {
           const safe = sanitizeText(chunk.text)
           if (safe) callbacks.onText(safe)
+        }
+        if (chunk.type === "reasoning-delta" && callbacks.onReasoning) {
+          callbacks.onReasoning(chunk.text)
         }
       },
       experimental_repairToolCall: async ({ toolCall, error }) => {
@@ -316,11 +320,14 @@ export async function planStep(
 
     const collectedToolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }> = []
     let collectedText = ""
+    let collectedReasoning = ""
 
     for await (const chunk of result.fullStream) {
       if (chunk.type === "text-delta") {
         collectedText += chunk.text
         collectedText = collectedText.replace(/```json[\s\S]*?```/g, "").trim()
+      } else if (chunk.type === "reasoning-delta") {
+        collectedReasoning += chunk.text
       } else if (chunk.type === "tool-call") {
         collectedToolCalls.push({
           toolCallId: chunk.toolCallId,
@@ -351,7 +358,7 @@ export async function planStep(
       return undefined
     })()
 
-    return { text: collectedText, toolCalls: collectedToolCalls, usage }
+    return { text: collectedText, reasoning: collectedReasoning, toolCalls: collectedToolCalls, usage }
   }
 
   try {
@@ -361,10 +368,10 @@ export async function planStep(
     )
 
     if (result.toolCalls.length > 0) {
-      return { type: "tool_calls", text: result.text, toolCalls: result.toolCalls, usage: result.usage }
+      return { type: "tool_calls", text: result.text, reasoning: result.reasoning, toolCalls: result.toolCalls, usage: result.usage }
     }
 
-    return { type: "text", content: result.text, usage: result.usage }
+    return { type: "text", content: result.text, reasoning: result.reasoning, usage: result.usage }
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error"
@@ -390,7 +397,7 @@ export async function planStep(
         () => doStreamText(textOnlyMessages, undefined),
         { signal }
       )
-      return { type: "text", content: fallbackResult.text, usage: fallbackResult.usage }
+      return { type: "text", content: fallbackResult.text, reasoning: fallbackResult.reasoning, usage: fallbackResult.usage }
     } catch (fallbackErr) {
       const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : "Unknown error"
       console.error(`[planner] Fallback also failed: ${fallbackMsg}`)
