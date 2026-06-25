@@ -53,6 +53,16 @@ function writeLogs(entries: UsageEntry[]): void {
   }
 }
 
+function getStartOfTodayMs(): number {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+}
+
+function getStartOfMinuteMs(): number {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes()).getTime()
+}
+
 export function logUsage(
   provider: string,
   model: string,
@@ -74,8 +84,8 @@ export function logUsage(
 
 export function getUsageSummary(): ProviderModelStats[] {
   const entries = readLogs()
-  const oneMinuteAgo = Date.now() - 60000
-  const oneDayAgo = Date.now() - 86400000
+  const todayStart = getStartOfTodayMs()
+  const minuteStart = getStartOfMinuteMs()
 
   const map = new Map<string, ProviderModelStats>()
 
@@ -110,11 +120,11 @@ export function getUsageSummary(): ProviderModelStats[] {
     stats.totalReasoningTokens += e.reasoningTokens
     stats.totalTokens += e.inputTokens + e.outputTokens + e.reasoningTokens
 
-    if (e.timestamp >= oneMinuteAgo) {
+    if (e.timestamp >= minuteStart) {
       stats.rpm++
       stats.tpm += e.inputTokens + e.outputTokens + e.reasoningTokens
     }
-    if (e.timestamp >= oneDayAgo) {
+    if (e.timestamp >= todayStart) {
       stats.rpd++
       stats.tpd += e.inputTokens + e.outputTokens + e.reasoningTokens
     }

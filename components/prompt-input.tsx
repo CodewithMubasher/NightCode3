@@ -244,7 +244,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       )}
       <div
         className="relative flex flex-col rounded-xl border bg-sidebar/95 px-4 py-3 shadow-lg"
-        style={{ borderLeft: "2px solid var(--primary-color)" }}
+        style={{ borderLeft: "2px solid var(--primary-color)", borderRight: "2px solid var(--primary-color)" }}
       >
         <div className="relative">
           <textarea

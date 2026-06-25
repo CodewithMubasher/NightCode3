@@ -24,10 +24,23 @@ export function ArtifactPanel() {
   const [isOpen, setIsOpen] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
   const isResizing = useRef(false)
+  const [dbArtifacts, setDbArtifacts] = useState<Artifact[]>([])
 
-  const artifacts: Artifact[] = chats.flatMap((c) =>
-    c.messages.flatMap((m) => m.artifacts)
-  )
+  const artifacts: Artifact[] = useMemo(() => {
+    const fromStore = chats.flatMap((c) => c.messages.flatMap((m) => m.artifacts))
+    const merged = new Map<string, Artifact>()
+    for (const a of fromStore) merged.set(a.id, a)
+    for (const a of dbArtifacts) if (!merged.has(a.id)) merged.set(a.id, a)
+    return Array.from(merged.values())
+  }, [dbArtifacts, chats])
+
+  useEffect(() => {
+    if (!isOpen) return
+    fetch("/api/artifacts")
+      .then((r) => r.json())
+      .then((data) => setDbArtifacts(data.artifacts ?? []))
+      .catch(() => {})
+  }, [isOpen, chats])
 
   const totalSize = artifacts.reduce((sum, a) => sum + a.content.length, 0)
   const storageLabel = totalSize > 1024 * 1024
@@ -62,12 +75,21 @@ export function ArtifactPanel() {
   }
 
   function handleSave() {
-    if (!activeArtifact || !artifactLocation) return
-    useNightCodeStore.getState().upsertArtifact(
-      artifactLocation.chatId,
-      artifactLocation.messageId,
-      { ...activeArtifact, content: editContent }
-    )
+    if (!activeArtifact) return
+    const updated = { ...activeArtifact, content: editContent }
+    if (artifactLocation) {
+      useNightCodeStore.getState().upsertArtifact(
+        artifactLocation.chatId,
+        artifactLocation.messageId,
+        updated
+      )
+    }
+    fetch("/api/artifacts", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: activeArtifact.id, content: editContent }),
+    })
+    setDbArtifacts((prev) => prev.map((a) => a.id === activeArtifact.id ? updated : a))
     setEditing(false)
   }
 
@@ -257,7 +279,8 @@ export function ArtifactPanel() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        useNightCodeStore.getState().deleteArtifact(artifact.id)
+                        fetch(`/api/artifacts?id=${artifact.id}`, { method: "DELETE" })
+                        setDbArtifacts((prev) => prev.filter((a) => a.id !== artifact.id))
                         if (activeArtifactId === artifact.id) setActiveArtifactId(null)
                       }}
                       className="mr-2 flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/50 opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-red-400 group-hover:opacity-100"

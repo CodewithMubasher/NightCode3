@@ -75,76 +75,85 @@ async function parseOpenAIStream(
 ): Promise<{ text: string; reasoning: string; toolCalls: StreamResult["toolCalls"]; usage?: UsageInfo }> {
   const decoder = new TextDecoder()
   let buffer = ""
-  let collectedText = ""
-  let collectedReasoning = ""
-  const collectedToolCalls: StreamResult["toolCalls"] = []
-  let usage: UsageInfo | undefined
+    let collectedText = ""
+    let collectedReasoning = ""
+    const collectedToolCalls: StreamResult["toolCalls"] = []
+    let usage: UsageInfo | undefined
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError")
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError")
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() || ""
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() || ""
 
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed === "data: [DONE]") continue
-      if (!trimmed.startsWith("data: ")) continue
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed === "data: [DONE]") continue
+        if (!trimmed.startsWith("data: ")) continue
 
-      try {
-        const json = JSON.parse(trimmed.slice(6))
-        const choices = json.choices ?? []
+        try {
+          const json = JSON.parse(trimmed.slice(6))
+          const choices = json.choices ?? []
 
-        for (const choice of choices) {
-          const delta = choice.delta ?? {}
-
-          if (delta.content) {
-            callbacks.onText?.(delta.content)
-            collectedText += delta.content
+          // Handle non-streaming format: choices[0].message.content
+          if (choices.length > 0 && choices[0].message?.content && !choices[0].delta) {
+            const msg = choices[0].message
+            if (msg.content) {
+              callbacks.onText?.(msg.content)
+              collectedText += msg.content
+            }
           }
 
-          if (delta.reasoning_content) {
-            callbacks.onReasoning?.(delta.reasoning_content)
-            collectedReasoning += delta.reasoning_content
-          }
+          for (const choice of choices) {
+            const delta = choice.delta ?? {}
 
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              if (tc.function?.name) {
-                collectedToolCalls.push({
-                  toolCallId: tc.id ?? `call_${Date.now()}`,
-                  toolName: tc.function.name,
-                  args: {},
-                })
-              }
-              if (tc.function?.arguments && collectedToolCalls.length > 0) {
-                const last = collectedToolCalls[collectedToolCalls.length - 1]
-                try {
-                  const parsed = JSON.parse(tc.function.arguments)
-                  last.args = { ...last.args, ...parsed }
-                } catch {
-                  last.args = { ...last.args, _raw: tc.function.arguments }
+            if (delta.content) {
+              callbacks.onText?.(delta.content)
+              collectedText += delta.content
+            }
+
+            if (delta.reasoning_content) {
+              callbacks.onReasoning?.(delta.reasoning_content)
+              collectedReasoning += delta.reasoning_content
+            }
+
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                if (tc.function?.name) {
+                  collectedToolCalls.push({
+                    toolCallId: tc.id ?? `call_${Date.now()}`,
+                    toolName: tc.function.name,
+                    args: {},
+                  })
+                }
+                if (tc.function?.arguments && collectedToolCalls.length > 0) {
+                  const last = collectedToolCalls[collectedToolCalls.length - 1]
+                  try {
+                    const parsed = JSON.parse(tc.function.arguments)
+                    last.args = { ...last.args, ...parsed }
+                  } catch {
+                    last.args = { ...last.args, _raw: tc.function.arguments }
+                  }
                 }
               }
             }
           }
-        }
 
-        if (json.usage) {
-          usage = {
-            inputTokens: json.usage.prompt_tokens ?? json.usage.inputTokens ?? 0,
-            outputTokens: json.usage.completion_tokens ?? json.usage.outputTokens ?? 0,
-            reasoningTokens: json.usage.reasoning_tokens ?? undefined,
+          if (json.usage) {
+            usage = {
+              inputTokens: json.usage.prompt_tokens ?? json.usage.inputTokens ?? 0,
+              outputTokens: json.usage.completion_tokens ?? json.usage.outputTokens ?? 0,
+              reasoningTokens: json.usage.reasoning_tokens ?? undefined,
+            }
           }
+        } catch {
+          // skip malformed JSON lines
         }
-      } catch {
-        // skip malformed JSON lines
       }
     }
-  }
 
   return { text: collectedText, reasoning: collectedReasoning, toolCalls: collectedToolCalls, usage }
 }
