@@ -375,6 +375,13 @@ export async function GET() {
     }
   }
 
+  groups.push({
+    label: "Local AI",
+    models: [
+      { id: "local-model", display_name: "Local AI Server", provider: "local", provider_display_name: "Local AI" },
+    ],
+  })
+
   if (groups.length === 0) {
     groups.push({
       label: "Demo",

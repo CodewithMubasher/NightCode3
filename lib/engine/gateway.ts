@@ -299,19 +299,21 @@ export async function streamChat(
     }
 
     const body: Record<string, unknown> = {
-      contents: messages.map((m) => ({
-        role: m.role === "assistant" ? "model" : m.role,
-        parts: typeof m.content === "string"
-          ? [{ text: m.content }]
-          : Array.isArray(m.content)
-            ? m.content.map((p: any) => {
-                if (p.type === "text") return { text: p.text }
-                if (p.type === "image") return { inlineData: { mimeType: p.mimeType ?? "image/png", data: p.image } }
-                if (p.type === "file") return { inlineData: { mimeType: p.mimeType ?? "application/pdf", data: p.data } }
-                return { text: JSON.stringify(p) }
-              })
-            : [{ text: JSON.stringify(m.content) }],
-      })),
+      contents: messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({
+          role: m.role === "assistant" ? "model" : m.role,
+          parts: typeof m.content === "string"
+            ? [{ text: m.content }]
+            : Array.isArray(m.content)
+              ? m.content.map((p: any) => {
+                  if (p.type === "text") return { text: p.text }
+                  if (p.type === "image") return { inlineData: { mimeType: p.mimeType ?? "image/png", data: p.image } }
+                  if (p.type === "file") return { inlineData: { mimeType: p.mimeType ?? "application/pdf", data: p.data } }
+                  return { text: JSON.stringify(p) }
+                })
+              : [{ text: JSON.stringify(m.content) }],
+        })),
     }
 
     if (systemPrompt) {
@@ -440,6 +442,64 @@ export async function streamChat(
     }
 
     return { text: collectedText, reasoning: "", toolCalls: [], usage }
+  }
+
+  if (provider === "local") {
+    const url = getBaseUrl(provider, model, false, null)
+
+    // Build full conversation history as a single prompt (server is single-turn, no memory)
+    const historyParts: string[] = []
+    for (const m of messages) {
+      if (m.role === "system") continue
+      const text = typeof m.content === "string"
+        ? m.content
+        : Array.isArray(m.content)
+          ? (m.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+          : ""
+      if (!text.trim()) continue
+      if (m.role === "user") {
+        historyParts.push(`User: ${text}`)
+      } else if (m.role === "assistant") {
+        historyParts.push(`Assistant: ${text}`)
+      } else if (m.role === "tool") {
+        historyParts.push(`Tool Result: ${text}`)
+      }
+    }
+    const conversationMessage = historyParts.join("\n\n")
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: conversationMessage,
+        system_prompt: systemPrompt || null,
+      }),
+      signal,
+    })
+
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(`Local AI error ${res.status}: ${errText.slice(0, 200)}`)
+    }
+
+    const json = await res.json()
+    let text = json.text ?? ""
+
+    // Append any images from the response as markdown
+    if (json.images && Array.isArray(json.images) && json.images.length > 0) {
+      const imageMd = json.images
+        .map((img: any) => {
+          if (img.url) return `![${img.alt || img.title || "image"}](${img.url})`
+          return ""
+        })
+        .filter(Boolean)
+        .join("\n")
+      if (imageMd) text = text ? `${text}\n\n${imageMd}` : imageMd
+    }
+
+    callbacks.onText?.(text)
+
+    return { text, reasoning: "", toolCalls: [], usage: undefined }
   }
 
   throw new Error(`Unsupported provider for streaming: ${provider}`)

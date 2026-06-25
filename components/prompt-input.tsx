@@ -85,12 +85,10 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
     if (!cachedSkills) {
       fetch("/api/skills").then((r) => r.json()).then((data: SkillInfo[]) => { cachedSkills = data; setSkills(data) }).catch(() => {})
     }
-    if (!cachedModelGroups) {
-      fetch("/api/models").then((r) => r.json()).then((groups: ModelGroupData[]) => {
-        cachedModelGroups = groups
-        setModelGroups(groups)
-      }).catch(() => {})
-    }
+    fetch("/api/models").then((r) => r.json()).then((groups: ModelGroupData[]) => {
+      cachedModelGroups = groups
+      setModelGroups(groups)
+    }).catch(() => {})
   }, [])
 
   React.useEffect(() => {
