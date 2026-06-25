@@ -53,6 +53,8 @@ export interface Message {
   hasError: boolean
   attachments?: AttachmentData[]
   generatedImages?: GeneratedImage[]
+  tokensPerSec?: number
+  totalTokens?: number
 }
 
 export interface Chat {
@@ -66,7 +68,7 @@ export interface Chat {
   projectId?: string
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare" | "freetheai"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare" | "freetheai"
 
 export type View = "chat" | "settings" | "projects"
 

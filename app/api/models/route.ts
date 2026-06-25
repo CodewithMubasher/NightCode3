@@ -28,7 +28,6 @@ const NAGA_KEY = () => getApiKey("NAGA_API_KEY")
 const SAMBANOVA_KEY = () => getApiKey("SAMBANOVA_API_KEY")
 const FREETHEAI_KEY = () => getApiKey("FREETHEAI_API_KEY")
 const CLOUDFLARE_KEY = () => getApiKey("CLOUDFLARE_API_TOKEN")
-const PUTER_ENABLED = true
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = []
 
@@ -258,24 +257,6 @@ async function fetchFreeTheAIModels() {
   }
 }
 
-async function fetchPuterModels() {
-  try {
-    const { default: puter } = await import("@heyputer/puter.js")
-    const raw = await puter.ai.listModels()
-    const models = (raw as any[])
-      .filter((m: any) => m.id)
-      .map((m: any) => ({
-        id: m.id,
-        display_name: m.name || m.id,
-        provider: "puter" as const,
-        provider_display_name: "Puter",
-      }))
-    return models.length > 0 ? models : null
-  } catch {
-    return null
-  }
-}
-
 export async function GET() {
   return getCached(async () => {
     const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
@@ -390,16 +371,6 @@ export async function GET() {
       groups.push({
         label: "FreeTheAI",
         models: faModels,
-      })
-    }
-  }
-
-  if (PUTER_ENABLED) {
-    const puterModels = await fetchPuterModels()
-    if (puterModels) {
-      groups.push({
-        label: "Puter",
-        models: puterModels,
       })
     }
   }

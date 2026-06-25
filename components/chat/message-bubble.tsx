@@ -690,7 +690,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   style={!rollingBack && spinKey > 0 ? { animation: "spin-once 0.4s ease-out", animationFillMode: "forwards" } : undefined}
                 />
               </button>
-              
+              <div className="flex-1" />
+              {message.tokensPerSec != null && message.tokensPerSec > 0 && (
+                <span className="text-[11px] font-mono text-muted-foreground/60 tabular-nums select-none">
+                  {message.tokensPerSec} tok/s
+                  {message.totalTokens != null && message.totalTokens > 0 && (
+                    <span className="ml-1.5">· {new Intl.NumberFormat("en-US", { notation: "compact" }).format(message.totalTokens)} tokens</span>
+                  )}
+                </span>
+              )}
             </div>
           )}
         </div>

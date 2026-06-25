@@ -179,6 +179,16 @@ export class EventRecorder {
         })
         break
       }
+
+      case "usage": {
+        createEvent({
+          session_id: sid,
+          event_type: "usage",
+          payload: JSON.stringify(payload),
+          timestamp: Date.now(),
+        })
+        break
+      }
     }
   }
 }

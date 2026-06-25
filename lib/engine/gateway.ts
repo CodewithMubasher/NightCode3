@@ -217,9 +217,10 @@ async function parseGeminiStream(
 
 // ─── Format messages for OpenAI-compatible APIs ───────────────────────────
 // Tool messages must have `tool_call_id` as a top-level field and string content.
+// Multimodal user messages must preserve content arrays with image_url parts.
 function formatOpenAIMessages(
   messages: Array<{ role: string; content: unknown }>,
-): Array<{ role: string; content: string; tool_call_id?: string }> {
+): Array<{ role: string; content: string | Array<Record<string, unknown>>; tool_call_id?: string }> {
   return messages.map((m) => {
     if (m.role === "tool" && Array.isArray(m.content)) {
       const toolResult = m.content.find(
@@ -232,6 +233,25 @@ function formatOpenAIMessages(
         content: typeof output === "string" ? output : JSON.stringify(output),
       }
     }
+
+    if (Array.isArray(m.content)) {
+      const parts = m.content.map((p: any) => {
+        if (p.type === "text") return { type: "text", text: p.text }
+        if (p.type === "image") {
+          const b64 = p.image ?? ""
+          const mime = p.mimeType ?? "image/png"
+          return { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } }
+        }
+        if (p.type === "file") {
+          const b64 = p.data ?? ""
+          const mime = p.mimeType ?? "application/pdf"
+          return { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } }
+        }
+        return { type: "text", text: JSON.stringify(p) }
+      })
+      return { role: m.role, content: parts }
+    }
+
     return {
       role: m.role,
       content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
@@ -376,6 +396,7 @@ export async function streamChat(
     if (!reader) throw new Error("No response body")
 
     let collectedText = ""
+    let usage: UsageInfo | undefined
     const decoder = new TextDecoder()
     let buffer = ""
 
@@ -391,7 +412,15 @@ export async function streamChat(
         if (!trimmed) continue
         try {
           const json = JSON.parse(trimmed)
-          if (json.done) break
+          if (json.done) {
+            if (json.prompt_eval_count != null || json.eval_count != null) {
+              usage = {
+                inputTokens: json.prompt_eval_count ?? 0,
+                outputTokens: json.eval_count ?? 0,
+              }
+            }
+            break
+          }
           const delta = json.message?.content || ""
           if (delta) {
             collectedText += delta
@@ -401,7 +430,7 @@ export async function streamChat(
       }
     }
 
-    return { text: collectedText, reasoning: "", toolCalls: [] }
+    return { text: collectedText, reasoning: "", toolCalls: [], usage }
   }
 
   throw new Error(`Unsupported provider for streaming: ${provider}`)

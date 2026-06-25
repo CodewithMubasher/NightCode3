@@ -172,6 +172,10 @@ export class NightCodeEngine {
     let finalText = ""
     let accumulatedReasoning = ""
     let consecutiveErrors = 0
+    let cumulativeInputTokens = 0
+    let cumulativeOutputTokens = 0
+    let cumulativeReasoningTokens = 0
+    let totalDurationMs = 0
     // Track which step produced which messages so we can remove them post-compaction
     const stepMessages = new Map<number, Array<{ role: string; content: unknown }>>()
     // Bounded concurrency for parallel tool execution — max 5 concurrent I/O ops
@@ -189,6 +193,7 @@ export class NightCodeEngine {
         toolIsolation?.setStepId(stepId)
 
         // ── 1. Single LLM call ────────────────────────────────────────────────
+        const stepStartTime = performance.now()
         const step = await planStep(
           currentMessages,
           provider,
@@ -208,12 +213,25 @@ export class NightCodeEngine {
         )
 
         if (step.usage) {
+          const stepDurationMs = performance.now() - stepStartTime
+          totalDurationMs += stepDurationMs
+          const outputTokensPerSec = stepDurationMs > 0
+            ? Math.round((step.usage.outputTokens / stepDurationMs) * 1000)
+            : 0
+          cumulativeInputTokens += step.usage.inputTokens
+          cumulativeOutputTokens += step.usage.outputTokens
+          cumulativeReasoningTokens += (step.usage.reasoningTokens ?? 0)
           this.emitEvent("usage", {
             provider,
             model,
             inputTokens: step.usage.inputTokens,
             outputTokens: step.usage.outputTokens,
             reasoningTokens: step.usage.reasoningTokens ?? 0,
+            outputTokensPerSec,
+            cumulativeInputTokens,
+            cumulativeOutputTokens,
+            cumulativeReasoningTokens,
+            stepDurationMs: Math.round(stepDurationMs),
           })
         }
 
@@ -226,8 +244,8 @@ export class NightCodeEngine {
             id: stepId,
             session_id: messageId,
             step_number: stepNumber,
-            input_tokens: null,
-            output_tokens: null,
+            input_tokens: step.usage?.inputTokens ?? null,
+            output_tokens: step.usage?.outputTokens ?? null,
             finish_reason: step.type === "text" ? "stop" : "tool_calls",
             created_at: Date.now(),
           })

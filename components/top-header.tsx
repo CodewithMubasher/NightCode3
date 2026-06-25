@@ -84,30 +84,38 @@ function ProviderUsageSection() {
 
 function useTpdTotals(): [number, number] {
   const [totalReq, setTotalReq] = React.useState(0)
-  const [totalRpd, setTotalRpd] = React.useState(0)
+  const [maxRpd, setMaxRpd] = React.useState(0)
 
   React.useEffect(() => {
     function refresh() {
       const stats = getUsageSummary()
       let req = 0
-      let rpd = 0
-      const seenProviders = new Set<string>()
+      let worstUsed = 0
+      let worstLimit = 0
+      const byProvider = new Map<string, { used: number; limit: number }>()
       for (const s of stats) {
         req += s.totalRequests
-        if (!seenProviders.has(s.provider)) {
-          if (s.limitRpd != null) rpd += s.limitRpd
-          seenProviders.add(s.provider)
+        const existing = byProvider.get(s.provider) ?? { used: 0, limit: 0 }
+        existing.used += s.rpd
+        if (s.limitRpd != null) existing.limit += s.limitRpd
+        byProvider.set(s.provider, existing)
+      }
+      // Find the provider closest to its limit
+      for (const [, v] of byProvider) {
+        if (v.limit > 0 && v.used / v.limit > (worstLimit > 0 ? worstUsed / worstLimit : 0)) {
+          worstUsed = v.used
+          worstLimit = v.limit
         }
       }
       setTotalReq(req)
-      setTotalRpd(rpd)
+      setMaxRpd(worstLimit > 0 ? worstLimit : 0)
     }
     refresh()
     const interval = setInterval(refresh, 5000)
     return () => clearInterval(interval)
   }, [])
 
-  return [totalReq, totalRpd]
+  return [totalReq, maxRpd]
 }
 
 export function TopHeader() {

@@ -20,7 +20,7 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   google_image: { envBase: "GOOGLE_IMAGE_KEY", maxSuffixed: 4, authType: "API_KEY" },
   groq:      { envBase: "GROQ_API_KEY",              maxSuffixed: 10, authType: "BEARER" },
   openai:    { envBase: "OPENAI_API_KEY",             maxSuffixed: 0,  authType: "BEARER" },
-  openrouter:{ envBase: "OPENROUTER_API_KEY",         maxSuffixed: 0,  authType: "BEARER" },
+  openrouter:{ envBase: "OPENROUTER_API_KEY",         maxSuffixed: 4,  authType: "BEARER" },
   opencode:  { envBase: "OPENCODE_API_KEY",           maxSuffixed: 0,  authType: "BEARER" },
   ollama:    { envBase: "OLLAMA_CLOUD_API_KEY",       maxSuffixed: 0,  authType: "BEARER" },
   xiaomi:    { envBase: "XIAOMI_API_KEY",             maxSuffixed: 0,  authType: "BEARER" },

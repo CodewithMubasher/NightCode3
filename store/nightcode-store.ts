@@ -795,6 +795,27 @@ export const useNightCodeStore = create<NightCodeState>()(
                         (p.outputTokens as number) ?? 0,
                         (p.reasoningTokens as number) ?? 0,
                       )
+                      // Update per-message tokens stats
+                      const tps = (p.outputTokensPerSec as number) ?? 0
+                      const totalTk = ((p.cumulativeInputTokens as number) ?? 0)
+                        + ((p.cumulativeOutputTokens as number) ?? 0)
+                        + ((p.cumulativeReasoningTokens as number) ?? 0)
+                      if (tps > 0 || totalTk > 0) {
+                        set((s) => ({
+                          chats: s.chats.map((c) =>
+                            c.id === chatId
+                              ? {
+                                  ...c,
+                                  messages: c.messages.map((m) =>
+                                    m.id === assistantMessage.id
+                                      ? { ...m, tokensPerSec: tps, totalTokens: totalTk }
+                                      : m
+                                  ),
+                                }
+                              : c
+                          ),
+                        }))
+                      }
                     }
                     break
                   }
