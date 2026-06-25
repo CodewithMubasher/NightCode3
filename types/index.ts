@@ -32,6 +32,16 @@ export interface Artifact {
   language?: string
 }
 
+// A generated image stored on the message, rendered inline in chat
+export interface GeneratedImage {
+  id: string
+  url: string
+  prompt: string
+  aspectRatio: string
+  generating: boolean
+  error?: boolean
+}
+
 export interface Message {
   id: string
   role: "user" | "assistant" | "system"
@@ -42,6 +52,7 @@ export interface Message {
   status: MessageStatus
   hasError: boolean
   attachments?: AttachmentData[]
+  generatedImages?: GeneratedImage[]
 }
 
 export interface Chat {
@@ -55,7 +66,7 @@ export interface Chat {
   projectId?: string
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "puter" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare" | "freetheai"
 
 export type View = "chat" | "settings" | "projects"
 

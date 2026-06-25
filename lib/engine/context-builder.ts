@@ -11,6 +11,7 @@ Assess the user's request and decide how to respond:
 - Need multiple files → create them all before responding.
 - Structured document (plan, roadmap, PRD, spec, guide) → use create_artifact.
 - Complex or ambiguous build requests → use ask tool first to gather requirements.
+- Image request (draw, generate, create an image, visualize) → use generate_image tool immediately. Do NOT describe the image in text — call the tool.
 
 ASK BEFORE BUILDING: For complex requests (building apps, creating projects, implementing features), use the ask tool to gather requirements first. Ask about tech stack, features, design preferences, and other relevant details. Give users maximum 4 options per question and keep them simple. Do NOT build anything until the user has answered your questions. The ask tool organizes questions into tabs, each tab containing related questions.
 
@@ -31,7 +32,20 @@ SURGICAL EDITS: For small changes (fix a typo, rename a variable, update a singl
 
 CONTENT SEARCH: Use grep to search file contents for patterns (function names, imports, variables). It returns matching lines with line numbers. Use read_file with offset and limit to read specific sections of a file instead of the entire file.
 
-RESPONSE FORMATTING: Structure your responses using headings, bullet lists, and code blocks. Never output large unstructured paragraphs. Use concise, scannable formatting that makes the information easy to digest.`
+RESPONSE FORMATTING: Structure your responses using headings, bullet lists, and code blocks. Never output large unstructured paragraphs. Use concise, scannable formatting that makes the information easy to digest.
+
+IMAGE GENERATION:
+- When a user asks to generate, draw, create, or visualize an image → call generate_image immediately.
+- You MUST generate a unique image_id for each call (use a short UUID like "img_abc123").
+- Write a detailed, vivid prompt. The more specific, the better the result.
+- Choose aspect_ratio based on the request: portraits → 9:16, landscapes/wallpapers → 16:9, square/general → 1:1.
+- After the tool completes, write ONE short sentence describing what was generated. Do not re-describe the prompt.
+- You can generate multiple images in parallel by calling generate_image multiple times in one step.
+
+VISION / FILE UNDERSTANDING:
+- When the user attaches an image, you can see it directly. Describe, analyze, or use it as instructed.
+- When the user attaches a PDF or text file, the content is included in the message. Read and use it.
+- Always acknowledge attached files in your response.`
 
 // ── BEAST-style prompt for fast/reasoning models (o-series, fast models) ──
 const BEAST_PROMPT = `You are NightCode — an autonomous coding agent. Keep going until the task is solved.
@@ -52,7 +66,9 @@ CONTENT SEARCH: Use grep to search file contents. It returns matching lines with
 
 PARALLEL TOOL RULE: Call multiple independent tools in a single step. Group independent operations together for efficiency.
 
-FILE PATHS: All paths are relative to the workspace directory. Use "project/index.html", not "/project/index.html".`
+FILE PATHS: All paths are relative to the workspace directory. Use "project/index.html", not "/project/index.html".
+
+IMAGE GENERATION: When asked to generate an image, call generate_image immediately with a detailed prompt and a unique image_id. Do not output text first.`
 
 const CAAT_PROMPT = `You are NightCode running in CODE-AS-A-TOOL (CaaT) mode.
 
@@ -110,8 +126,6 @@ ${mcpSection}`
 }
 
 // ── In-memory compaction cache ──────────────────────────────────────────────
-// Avoids re-querying the DB on every step when compactions haven't changed.
-// Invalidated by the caller after a new compaction is written.
 const compactionCache = new Map<string, { block: string; count: number }>()
 
 export function invalidateCompactionCache(sessionId: string): void {
@@ -167,12 +181,41 @@ export function buildDynamicBlock(sessionId?: string): string | null {
   return `## Session Context\n\n${parts.join("\n\n")}`
 }
 
+// ── Multimodal content part types ──────────────────────────────────────────
+type TextPart = { type: "text"; text: string }
+type ImagePart = { type: "image"; image: string; mimeType: string }
+type FilePart = { type: "file"; data: string; mimeType: string; filename?: string }
+type ContentPart = TextPart | ImagePart | FilePart
+
+type MessageContent = string | ContentPart[]
+
+interface RequestMessage {
+  role: string
+  content: MessageContent
+}
+
 export function buildRequest(
   messages: Message[],
   systemPrompt: string,
   sessionId?: string
-): { system: string; messages: Array<{ role: string; content: string }> } {
-  const msgs = messages.map((m) => ({ role: m.role, content: m.content }))
+): { system: string; messages: RequestMessage[] } {
+  // Preserve multimodal content — if the message has array content (passed from store),
+  // keep it as-is. Otherwise extract the text string.
+  const msgs: RequestMessage[] = messages.map((m) => {
+    // The store sends pre-built multimodal payloads for messages with attachments.
+    // The content field on Message is always a string (display text), but the API
+    // payload built in nightcode-store already serialises attachments into parts.
+    // We trust whatever arrived in `m` — if it has a `parts` field use that,
+    // otherwise fall back to the string content.
+    const raw = m as any
+    if (Array.isArray(raw.content)) {
+      return { role: m.role, content: raw.content as ContentPart[] }
+    }
+    return {
+      role: m.role,
+      content: m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim(),
+    }
+  })
 
   const dynamicBlock = buildDynamicBlock(sessionId)
   if (dynamicBlock) {
@@ -186,7 +229,7 @@ export function buildContext(
   messages: Message[],
   systemPrompt: string,
   sessionId?: string
-): Array<{ role: string; content: string }> {
+): Array<{ role: string; content: MessageContent }> {
   const { system, messages: msgs } = buildRequest(messages, systemPrompt, sessionId)
   return [{ role: "system", content: system }, ...msgs]
 }

@@ -25,6 +25,7 @@ const PROVIDER_KEYS: { env_name: string; display_name: string }[] = [
   { env_name: "ROUTEWAY_API_KEY", display_name: "Routeway" },
   { env_name: "SAMBANOVA_API_KEY", display_name: "SambaNova" },
   { env_name: "OLLAMA_CLOUD_API_KEY", display_name: "Ollama Cloud" },
+  { env_name: "FREETHEAI_API_KEY", display_name: "FreeTheAI" },
 ]
 
 function getOldApiKey(envName: string): string | undefined {
@@ -120,8 +121,51 @@ export function deleteAccount(label: string): void {
   db.prepare("DELETE FROM accounts WHERE label = ?").run(label)
 }
 
+export function hasAnyKey(baseEnvName: string): boolean {
+  const base = getApiKey(baseEnvName)
+  if (base) return true
+  for (let i = 1; i <= 10; i++) {
+    const val = process.env[`${baseEnvName}_${i}`]
+    if (val && val.trim()) return true
+  }
+  return false
+}
+
 export function maskKey(key: string): string {
   if (!key) return ""
   if (key.length <= 8) return key.slice(0, 2) + "..." + key.slice(-2)
   return key.slice(0, 4) + "..." + key.slice(-4)
+}
+
+// ── Multi-key rotation ────────────────────────────────────────────────────────
+// Providers like Groq, Google, etc. can have multiple keys via suffixed env vars:
+//   GROQ_API_KEY       → fallback/base
+//   GROQ_API_KEY_1     → key 1 (rotated)
+//   GROQ_API_KEY_2     → key 2 (rotated)
+//   GROQ_API_KEY_3     → key 3 (rotated)
+//   ...
+// getNextKey() round-robins across all available keys.
+
+const rotationCounters = new Map<string, number>()
+
+export function getNextKey(baseEnvName: string): string {
+  const keys: string[] = []
+
+  // Base key from DB or env
+  const base = getApiKey(baseEnvName)
+  if (base) keys.push(base)
+
+  // Suffixed keys from env only (these aren't in the DB system)
+  for (let i = 1; i <= 10; i++) {
+    const val = process.env[`${baseEnvName}_${i}`]
+    if (val && val.trim()) {
+      keys.push(val.trim())
+    }
+  }
+
+  if (keys.length === 0) return ""
+
+  const counter = rotationCounters.get(baseEnvName) ?? 0
+  rotationCounters.set(baseEnvName, counter + 1)
+  return keys[counter % keys.length]
 }

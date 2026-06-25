@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData, Project, PendingConfirmation } from "@/types"
+import type { Chat, Message, AttachmentData, Artifact, MessageStatus, ToolState, ToolStatus, AppSettings, AskData, Project, PendingConfirmation, GeneratedImage } from "@/types"
 import { toast } from "sonner"
 
 function generateId(): string {
@@ -59,6 +59,11 @@ interface NightCodeState {
   deleteArtifact: (artifactId: string) => void
   renameChat: (id: string, title: string) => void
   moveChatToProject: (chatId: string, projectId: string | null) => void
+
+  // Image generation
+  addGeneratingImage: (chatId: string, messageId: string, image: GeneratedImage) => void
+  resolveGeneratedImage: (chatId: string, messageId: string, imageId: string, url: string) => void
+  failGeneratedImage: (chatId: string, messageId: string, imageId: string) => void
 
   rollbackToMessage: (chatId: string, messageId: string) => void
 
@@ -308,6 +313,77 @@ export const useNightCodeStore = create<NightCodeState>()(
         }))
       },
 
+      // ── Image generation state helpers ──────────────────────────────────
+      addGeneratingImage: (chatId, messageId, image) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) => {
+                    if (m.id !== messageId) return m
+                    const imgs = m.generatedImages ?? []
+                    // De-duplicate: if a generating card with the same prompt exists, update its id
+                    const existingIdx = imgs.findIndex(
+                      (img) => img.generating && img.prompt === image.prompt
+                    )
+                    if (existingIdx >= 0) {
+                      const updated = [...imgs]
+                      updated[existingIdx] = { ...updated[existingIdx], id: image.id }
+                      return { ...m, generatedImages: updated }
+                    }
+                    return { ...m, generatedImages: [...imgs, image] }
+                  }),
+                }
+              : c
+          ),
+        }))
+      },
+
+      resolveGeneratedImage: (chatId, messageId, imageId, url) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === messageId
+                      ? {
+                          ...m,
+                          generatedImages: (m.generatedImages ?? []).map((img) =>
+                            img.id === imageId ? { ...img, url, generating: false } : img
+                          ),
+                        }
+                      : m
+                  ),
+                }
+              : c
+          ),
+        }))
+      },
+
+      failGeneratedImage: (chatId, messageId, imageId) => {
+        set((s) => ({
+          chats: s.chats.map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === messageId
+                      ? {
+                          ...m,
+                          generatedImages: (m.generatedImages ?? []).map((img) =>
+                            img.id === imageId ? { ...img, generating: false, error: true, url: "" } : img
+                          ),
+                        }
+                      : m
+                  ),
+                }
+              : c
+          ),
+        }))
+      },
+
       renameChat: (id, title) => {
         set((s) => ({
           chats: s.chats.map((c) => (c.id === id ? { ...c, title, updatedAt: Date.now() } : c)),
@@ -410,23 +486,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         const signal = abortController.signal
 
         console.log('User message:', content)
-        console.log('Skills detected:', skills)
-
-        // ── Auto-detect frontend-design skill ──────────────────────────────
-        const designKeywords = [
-          "design", "ui", "ux", "frontend", "style", "css", "html",
-          "landing page", "login page", "website", "app", "interface",
-          "beautiful", "modern", "animation", "gradient", "typography",
-          "shadcn", "lucide", "component", "layout", "responsive",
-        ]
-        const msg = content.toLowerCase()
-        if (
-          !skills?.includes("frontend-design") &&
-          designKeywords.some((k) => msg.includes(k))
-        ) {
-          skills = [...(skills ?? []), "frontend-design"]
-          console.log('Auto-activated frontend-design skill')
-        }
+        console.log('Skills:', skills)
 
         const skillStates: ToolState[] = []
         let skillInjected = ""
@@ -477,10 +537,63 @@ export const useNightCodeStore = create<NightCodeState>()(
         }))
 
         try {
-          const messagePayload = [...chat.messages, userMessage].map((m) => ({
-            role: m.role,
-            content: m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim(),
-          }))
+          // ── Build multimodal message payload ──────────────────────────────
+          // For messages with attachments, content becomes an array so the LLM
+          // can see images and files — not just text.
+          const messagePayload = [...chat.messages, userMessage].map((m) => {
+            const textContent = m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+
+            if (!m.attachments || m.attachments.length === 0) {
+              return { role: m.role, content: textContent }
+            }
+
+            // Build multimodal content parts
+            const parts: Array<{
+              type: string
+              text?: string
+              image?: string
+              mimeType?: string
+              data?: string
+              filename?: string
+            }> = []
+
+            if (textContent) {
+              parts.push({ type: "text", text: textContent })
+            }
+
+            for (const att of m.attachments) {
+              const mime = att.mediaType ?? att.contentType ?? ""
+              const dataUrl = att.data ?? att.url ?? ""
+
+              // Strip the "data:...;base64," prefix to get raw base64
+              const base64Match = dataUrl.match(/^data:[^;]+;base64,(.+)$/)
+              const base64Data = base64Match ? base64Match[1] : dataUrl
+
+              if (mime.startsWith("image/")) {
+                // Images go as image parts — Vercel AI SDK handles this for vision models
+                parts.push({ type: "image", image: base64Data, mimeType: mime })
+              } else if (mime === "application/pdf") {
+                // PDFs as file parts
+                parts.push({ type: "file", data: base64Data, mimeType: "application/pdf", filename: att.filename })
+              } else {
+                // Text files, CSVs, etc. — inline as text with filename header
+                // Try to decode base64 back to text for text-based files
+                try {
+                  const decoded = typeof atob !== "undefined"
+                    ? atob(base64Data)
+                    : Buffer.from(base64Data, "base64").toString("utf-8")
+                  parts.push({
+                    type: "text",
+                    text: `[Attached file: ${att.filename ?? "file"}]\n\`\`\`\n${decoded.slice(0, 20000)}\n\`\`\``,
+                  })
+                } catch {
+                  parts.push({ type: "text", text: `[Attached file: ${att.filename ?? "file"} — could not decode content]` })
+                }
+              }
+            }
+
+            return { role: m.role, content: parts }
+          })
 
           const effectiveProvider = provider ?? chat.provider
           const effectiveModel = model ?? chat.model
@@ -544,15 +657,19 @@ export const useNightCodeStore = create<NightCodeState>()(
                     break
                   }
                   case "reasoning_delta": {
-                    const rText = (parsed.payload?.text as string) ?? ""
-                    if (rText) get().updateMessageReasoning(chatId, assistantMessage.id, rText)
                     break
                   }
                   case "thinking": {
                     const text = (parsed.payload?.text as string) ?? ""
-                    if (text) get().setMessageContent(chatId, assistantMessage.id, text)
                     const reasoning = (parsed.payload?.reasoning as string) ?? ""
                     if (reasoning) get().setMessageReasoning(chatId, assistantMessage.id, reasoning)
+                    if (text) {
+                      const state = get()
+                      const msg = state.chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === assistantMessage.id)
+                      if (msg && !msg.content) {
+                        get().setMessageContent(chatId, assistantMessage.id, text)
+                      }
+                    }
                     break
                   }
                   case "tool_start": {
@@ -568,6 +685,20 @@ export const useNightCodeStore = create<NightCodeState>()(
                       timestamp: parsed.timestamp ?? Date.now(),
                     }
                     get().updateToolState(chatId, assistantMessage.id, ts)
+
+                    // ── Image generation: add shimmer placeholder immediately ──
+                    // addGeneratingImage is idempotent — retries reuse the same card
+                    if (tool === "generate_image" && args.image_id) {
+                      const placeholderImg: GeneratedImage = {
+                        id: args.image_id as string,
+                        url: "",
+                        prompt: (args.prompt as string) ?? "",
+                        aspectRatio: (args.aspect_ratio as string) ?? "1:1",
+                        generating: true,
+                      }
+                      get().addGeneratingImage(chatId, assistantMessage.id, placeholderImg)
+                    }
+
                     if (
                       tool === "write_file" &&
                       typeof args.path === "string" &&
@@ -583,10 +714,41 @@ export const useNightCodeStore = create<NightCodeState>()(
                     if (!toolCallId) break
                     const msg = get().chats.find((c) => c.id === chatId)
                       ?.messages.find((m) => m.id === assistantMessage.id)
-                    const existing = msg?.toolStates[toolCallId]
+                    // The engine emits tool_end with tc.toolCallId (LLM's ID),
+                    // but tool_start registered under tc.generatedId (engine's ID).
+                    // Check both to find the existing tool state.
+                    let existing = msg?.toolStates[toolCallId]
+                    if (!existing && msg) {
+                      // Fallback: find by matching tool name from payload
+                      const payloadTool = parsed.payload?.tool as string
+                      if (payloadTool) {
+                        for (const ts of Object.values(msg.toolStates)) {
+                          if (ts.tool === payloadTool && ts.status === "running") {
+                            existing = ts
+                            break
+                          }
+                        }
+                      }
+                    }
+
+                    // ── Image generation: resolve or fail the placeholder ──
+                    const toolName = existing?.tool ?? (parsed.payload?.tool as string)
+                    if (toolName === "generate_image") {
+                      const result = parsed.payload?.result as Record<string, unknown> | undefined
+                      const imageId = (existing?.args?.image_id ?? result?.image_id) as string | undefined
+                      if (imageId) {
+                        const payloadStatus = parsed.payload?.status as string
+                        if (payloadStatus === "verified" && typeof result?.url === "string") {
+                          get().resolveGeneratedImage(chatId, assistantMessage.id, imageId, result.url as string)
+                        } else {
+                          get().failGeneratedImage(chatId, assistantMessage.id, imageId)
+                        }
+                      }
+                    }
+
                     if (existing) {
                       get().updateToolState(chatId, assistantMessage.id, {
-                        id: toolCallId,
+                        id: existing.id,
                         tool: existing.tool,
                         args: existing.args,
                         status: (parsed.payload?.status as ToolStatus) ?? "verified",
@@ -596,8 +758,6 @@ export const useNightCodeStore = create<NightCodeState>()(
                         timestamp: existing.timestamp,
                       })
                     } else {
-                      // tool_end arrived before tool_start (edge case: out-of-order events).
-                      // Create the entry with the end state so it's not lost.
                       get().updateToolState(chatId, assistantMessage.id, {
                         id: toolCallId,
                         tool: (parsed.payload?.tool as string) ?? "unknown",
@@ -663,8 +823,6 @@ export const useNightCodeStore = create<NightCodeState>()(
                     get().updateMessageStatus(chatId, assistantMessage.id, "complete")
                     const completedMsg = get().chats.find((c) => c.id === chatId)
                       ?.messages.find((m) => m.id === assistantMessage.id)
-                    // Only auto-open artifact panel when ALL tool execution is done.
-                    // Don't open during streaming or if tools are still running.
                     const hasRunningTools = completedMsg?.toolStates
                       ? Object.values(completedMsg.toolStates).some((t) => t.status === "running")
                       : false
@@ -700,6 +858,7 @@ export const useNightCodeStore = create<NightCodeState>()(
             get().updateMessageStatus(chatId, assistantMessage.id, "error")
           }
         } finally {
+          // Clean up any shimmers that got stuck (engine crashed before tool_end)
           set((s) => ({
             chats: s.chats.map((c) =>
               c.id === chatId
@@ -707,6 +866,17 @@ export const useNightCodeStore = create<NightCodeState>()(
                     ...c,
                     ...(model && model !== c.model ? { model } : {}),
                     ...(provider && provider !== c.provider ? { provider } : {}),
+                    messages: c.messages.map((m) => {
+                      if (m.generatedImages?.some((img) => img.generating)) {
+                        return {
+                          ...m,
+                          generatedImages: m.generatedImages.map((img) =>
+                            img.generating ? { ...img, generating: false, error: true } : img
+                          ),
+                        }
+                      }
+                      return m
+                    }),
                   }
                 : c
             ),
@@ -736,7 +906,6 @@ export const useNightCodeStore = create<NightCodeState>()(
           return
         }
         const data = await res.json()
-        // Update the tool state to show deletion succeeded
         set((s) => ({
           chats: s.chats.map((c) =>
             c.id === chatId
@@ -820,7 +989,6 @@ export const useNightCodeStore = create<NightCodeState>()(
               const toolStates = msg.toolStates
               const hasRunning = Object.values(toolStates).some((t) => t.status === "running")
               if (hasRunning) {
-                // Mark all "running" tools as "skipped" — they never completed
                 for (const [id, ts] of Object.entries(toolStates)) {
                   if (ts.status === "running") {
                     toolStates[id] = { ...ts, status: "skipped" }
@@ -832,6 +1000,12 @@ export const useNightCodeStore = create<NightCodeState>()(
               } else {
                 msg.status = "complete"
               }
+            }
+            // Clean up any stuck generating images on reload
+            if (msg.generatedImages) {
+              msg.generatedImages = msg.generatedImages.map((img) =>
+                img.generating ? { ...img, generating: false, error: true } : img
+              )
             }
           }
         }

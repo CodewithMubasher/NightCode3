@@ -170,6 +170,7 @@ export class NightCodeEngine {
     const MAX_STEPS = config.maxIterations
     let toolCallCount = 0
     let finalText = ""
+    let accumulatedReasoning = ""
     let consecutiveErrors = 0
     // Track which step produced which messages so we can remove them post-compaction
     const stepMessages = new Map<number, Array<{ role: string; content: unknown }>>()
@@ -198,6 +199,7 @@ export class NightCodeEngine {
               this.emitEvent("text_delta", { text })
             },
             onReasoning: (text) => {
+              accumulatedReasoning += text
               this.emitEvent("reasoning_delta", { text })
             },
           },
@@ -236,7 +238,7 @@ export class NightCodeEngine {
           finalText = step.content
 
           console.log(`[engine] Done. ${toolCallCount} total tool calls across ${stepNumber} steps. Final text length: ${finalText.length}`)
-          this.emitEvent("thinking", { text: finalText, reasoning: step.reasoning ?? "", toolCallCount })
+          this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
           compactionService?.onStepComplete(stepNumber, provider, model)
           break
         }
@@ -295,15 +297,10 @@ export class NightCodeEngine {
 
         const validCalls = calls.filter((tc) => tc.toolDef)
 
-        // State: pending → emit pending events for all valid calls
-        for (const tc of validCalls) {
-          this.emitEvent("tool_pending", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
-        }
-
-        // State: pending → running for all valid calls
+        // Emit tool_start for all valid calls (store expects tool_start/tool_end)
         for (const tc of validCalls) {
           toolIsolation?.markRunning(tc.generatedId, tc.toolName)
-          this.emitEvent("tool_running", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
+          this.emitEvent("tool_start", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
         }
 
         // Execute all valid tools in parallel (bounded to 5 concurrent)
@@ -397,10 +394,12 @@ export class NightCodeEngine {
           if (!result.success) {
             roundFailed++
             roundTotal++
-            this.emitEvent("tool_error", {
+            this.emitEvent("tool_end", {
               tool: tc.toolName,
               args: tc.args,
+              status: "error",
               error: result.error,
+              callNumber: toolCallCount,
               toolCallId: tc.generatedId,
             })
             toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, result.error ?? "Tool execution failed", null, undefined)
@@ -444,9 +443,10 @@ export class NightCodeEngine {
               }
             }
 
-            this.emitEvent("tool_completed", {
+            this.emitEvent("tool_end", {
               tool: tc.toolName,
               args: tc.args,
+              status: "verified",
               result: result.data,
               evidence: verification.evidence,
               callNumber: toolCallCount,
@@ -471,10 +471,12 @@ export class NightCodeEngine {
           } else {
             roundFailed++
             roundTotal++
-            this.emitEvent("tool_error", {
+            this.emitEvent("tool_end", {
               tool: tc.toolName,
               args: tc.args,
+              status: "error",
               error: `Verification failed: ${verification.discrepancy}`,
+              callNumber: toolCallCount,
               toolCallId: tc.generatedId,
             })
             toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, `Verification failed: ${verification.discrepancy}`, null, undefined)
@@ -496,6 +498,34 @@ export class NightCodeEngine {
           console.log(`[engine] Round failure rate ${roundFailed}/${roundTotal} > 50%, consecutiveErrors=${consecutiveErrors}`)
         } else {
           consecutiveErrors = 0
+        }
+
+        // ── Circuit breaker: stop loop if generate_image failed ──────────
+        // Image generation is expensive and retries waste tokens + UI state.
+        const imageFailures = execResults.filter(
+          (r): r is typeof r & { success: false; error?: string } =>
+            r.tc.toolName === "generate_image" && !r.success && !r.skipResult
+        )
+        if (imageFailures.length > 0) {
+          const errors = imageFailures.map((r) => r.error).filter(Boolean).join("; ")
+          console.log(`[engine] Circuit breaker: generate_image failed. ${errors ? `Error: ${errors}` : ""}`)
+          if (!finalText) {
+            finalText = errors
+              ? `Image generation failed: ${errors}`
+              : "Image generation failed"
+            this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
+          }
+          break
+        }
+
+        // ── Stop loop if image succeeded — image IS the answer ───────────
+        const hadImageSuccess = execResults.some(
+          (r) => r.tc.toolName === "generate_image" && r.success && !r.skipResult
+        )
+        if (hadImageSuccess) {
+          console.log(`[engine] Image generated. Stopping — image is the answer.`)
+          this.emitEvent("thinking", { text: "", reasoning: accumulatedReasoning, toolCallCount })
+          break
         }
 
         // ── 5. Trigger compaction if enough steps have passed ──────────────
@@ -574,7 +604,7 @@ export class NightCodeEngine {
 
       if (stepNumber >= MAX_STEPS && !finalText) {
         finalText = "I've reached the maximum number of steps for this request. Please try a simpler request or ask me to continue."
-        this.emitEvent("thinking", { text: finalText, toolCallCount })
+        this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
       }
 
       return finalText

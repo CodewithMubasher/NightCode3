@@ -3,70 +3,58 @@ import { Copy } from "lucide-react"
 import katex from "katex"
 import "katex/dist/katex.min.css"
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function renderMathBlock(mathStr: string, key: string): ReactNode {
-  try {
-    const html = katex.renderToString(mathStr.trim(), {
-      displayMode: true,
-      throwOnError: false,
-      output: "html",
-      trust: true,
-      // These macros let \text, \begin{align}, &=, \\ all work correctly
-      macros: {
-        "\\R": "\\mathbb{R}",
-        "\\N": "\\mathbb{N}",
-        "\\Z": "\\mathbb{Z}",
-      },
-    })
-    return (
-      <div
-        key={key}
-        className="my-4 overflow-x-auto rounded-md py-3 text-center"
-        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    )
-  } catch {
-    return (
-      <pre
-        key={key}
-        className="my-2 rounded bg-white/5 px-3 py-2 text-sm font-mono text-white/60 overflow-x-auto"
-      >
-        {mathStr}
-      </pre>
-    )
-  }
-}
-
-function renderInlineMath(mathStr: string, key: number): ReactNode {
-  try {
-    const html = katex.renderToString(mathStr, {
-      displayMode: false,
-      throwOnError: false,
-      output: "html",
-      trust: true,
-    })
-    return (
-      <span
-        key={key}
-        dangerouslySetInnerHTML={{ __html: html }}
-        className="inline-math mx-0.5"
-      />
-    )
-  } catch {
-    return <span key={key}>${mathStr}$</span>
-  }
-}
-
 function normalizeLatex(s: string): string {
   return s
     .replace(/\\\\\[/g, "\\[")
     .replace(/\\\\\]/g, "\\]")
 }
 
+// ── Pre-process raw markdown to fix malformed $$ usage ────────────────────
+// AI often outputs $$ inline as a separator (e.g. "text$$math$$more text")
+// instead of on its own line. This normalizes it before line-splitting.
+function normalizeDollarBlocks(s: string): string {
+  // Step 1: If a line contains $$ but doesn't START with $$,
+  // split it so each $$ segment is on its own line.
+  const lines = s.split("\n")
+  const result: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    // If the line is just $$ (fence), keep it
+    if (trimmed === "$$") {
+      result.push(line)
+      continue
+    }
+
+    // If the line contains $$, split into alternating text/math segments.
+    // This handles cases like: $$math1$$text$$math2$$ on a single line.
+    if (trimmed.includes("$$")) {
+      const parts = trimmed.split("$$")
+      // parts alternates: text(0), math(1), text(2), math(3), ...
+      // Empty even parts are skipped; empty odd parts (empty math) are skipped.
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i]
+        const isMath = i % 2 === 1
+        if (isMath) {
+          if (part.trim()) result.push("$$" + part.trim() + "$$")
+        } else {
+          // text segment — may contain $inline$ math, renderInline handles it
+          if (part.trim()) result.push(part.trim())
+        }
+      }
+      continue
+    }
+
+    result.push(line)
+  }
+
+  return result.join("\n")
+}
+
 function normalizeMarkdown(raw: string): string {
   let s = normalizeLatex(raw)
+  s = normalizeDollarBlocks(s)
 
   // 1. Inject newline before any heading not already at line start
   s = s.replace(/([^\n])(#{1,3}\s)/g, "$1\n$2")
@@ -83,8 +71,6 @@ function normalizeMarkdown(raw: string): string {
   return s
 }
 
-// ── Main renderer ──────────────────────────────────────────────────────────
-
 export function renderInlineMarkdown(content: string): ReactNode {
   const lines = normalizeMarkdown(content).split("\n")
   const elements: ReactNode[] = []
@@ -96,11 +82,8 @@ export function renderInlineMarkdown(content: string): ReactNode {
     const line = lines[i]
     const trimmed = line.trim()
 
-    // ── Split hybrid heading+table lines ────────────────────────────────
-    if (
-      (trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) &&
-      trimmed.includes("|")
-    ) {
+    // ── Split hybrid heading+table lines ─────────────────────────────────
+    if ((trimmed.startsWith("### ") || trimmed.startsWith("## ") || trimmed.startsWith("# ")) && trimmed.includes("|")) {
       const pipeIndex = trimmed.indexOf("|")
       const headingPart = trimmed.slice(0, pipeIndex).trim()
       const tablePart = trimmed.slice(pipeIndex)
@@ -109,7 +92,7 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Drop orphaned separator rows ────────────────────────────────────
+    // ── Drop orphaned separator rows ─────────────────────────────────────
     if (/^\|[\s|:\-]+\|$/.test(trimmed)) continue
 
     // ── Code fence ──────────────────────────────────────────────────────
@@ -133,12 +116,14 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Block math: $$ on its own line (opening fence) ──────────────────
-    // Handles:
-    //   $$              ← opening line alone
-    //   \text{LHS} &= 2x + 5 \\
-    //   \text{RHS} &= x + 7
-    //   $$              ← closing line alone
+    // ── Block math: $$...$$ on a single line ────────────────────────────
+    if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length > 4) {
+      const mathStr = trimmed.slice(2, -2).trim()
+      elements.push(renderMathBlock(mathStr, `math-single-${i}`))
+      continue
+    }
+
+    // ── Block math: $$ fence (opening alone) ────────────────────────────
     if (trimmed === "$$") {
       let mathContent = ""
       let j = i + 1
@@ -147,46 +132,18 @@ export function renderInlineMarkdown(content: string): ReactNode {
         j++
       }
       elements.push(renderMathBlock(mathContent, `math-fence-${i}`))
-      i = j // skip past closing $$
-      continue
-    }
-
-    // ── Block math: $$...$$ on a single line ────────────────────────────
-    if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length > 4) {
-      const mathStr = trimmed.slice(2, -2).trim()
-      elements.push(renderMathBlock(mathStr, `math-single-${i}`))
-      continue
-    }
-
-    // ── Block math: $$ ... (opening, content on same line, no closing) ──
-    // Handles: $$\text{LHS} &= 2x + 5 \\   (opening $$ with content)
-    if (trimmed.startsWith("$$") && !trimmed.endsWith("$$")) {
-      let mathContent = trimmed.slice(2).trim()
-      let j = i + 1
-      while (j < lines.length) {
-        const jt = lines[j].trim()
-        if (jt === "$$" || jt.endsWith("$$")) {
-          if (jt !== "$$") {
-            mathContent += "\n" + jt.slice(0, jt.endsWith("$$") ? -2 : undefined).trim()
-          }
-          break
-        }
-        mathContent += "\n" + lines[j]
-        j++
-      }
-      elements.push(renderMathBlock(mathContent, `math-inline-open-${i}`))
       i = j
       continue
     }
 
-    // ── Block math: \[...\] single line ────────────────────────────────
+    // ── Block math: \[...\] single line ─────────────────────────────────
     if (trimmed.startsWith("\\[") && trimmed.endsWith("\\]")) {
       const mathStr = trimmed.slice(2, -2).trim()
-      elements.push(renderMathBlock(mathStr, `math-bracket-single-${i}`))
+      elements.push(renderMathBlock(mathStr, `math-bracket-${i}`))
       continue
     }
 
-    // ── Block math: \[ multiline \] ─────────────────────────────────────
+    // ── Block math: \[ multiline \] ──────────────────────────────────────
     if (trimmed.startsWith("\\[") && !trimmed.endsWith("\\]")) {
       let mathContent = trimmed.slice(2)
       let j = i + 1
@@ -197,15 +154,13 @@ export function renderInlineMarkdown(content: string): ReactNode {
       if (j < lines.length) {
         mathContent += "\n" + lines[j].trim().slice(0, -2)
       }
-      elements.push(renderMathBlock(mathContent, `math-bracket-ml-${i}`))
+      elements.push(renderMathBlock(mathContent.trim(), `math-bracket-ml-${i}`))
       i = j
       continue
     }
 
     // ── Block math: \begin{...} environments ────────────────────────────
-    // Handles \begin{align}, \begin{aligned}, \begin{equation}, \begin{matrix}, etc.
     if (/^\\begin\{/.test(trimmed)) {
-      // Extract environment name
       const envMatch = trimmed.match(/^\\begin\{([^}]+)\}/)
       const envName = envMatch ? envMatch[1] : ""
       let mathContent = trimmed
@@ -215,15 +170,13 @@ export function renderInlineMarkdown(content: string): ReactNode {
         mathContent += "\n" + lines[j]
         j++
       }
-      if (j < lines.length) {
-        mathContent += "\n" + lines[j]
-      }
+      if (j < lines.length) mathContent += "\n" + lines[j]
       elements.push(renderMathBlock(mathContent, `math-env-${i}`))
       i = j
       continue
     }
 
-    // ── Horizontal rule ─────────────────────────────────────────────────
+    // ── Horizontal rule ──────────────────────────────────────────────────
     if (/^(\*{3,}|-{3,}|_{3,})\s*$/.test(trimmed)) {
       elements.push(<hr key={`hr-${i}`} className="my-3 border-0 border-t border-white/10" />)
       continue
@@ -264,17 +217,15 @@ export function renderInlineMarkdown(content: string): ReactNode {
       continue
     }
 
-    // ── Unordered list (with sub-item support) ───────────────────────────
+    // ── Unordered list ───────────────────────────────────────────────────
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       type ListItem = { text: string; children: string[] }
       const items: ListItem[] = [{ text: trimmed.slice(2), children: [] }]
       let j = i + 1
-
       while (j < lines.length) {
         const nextLine = lines[j]
         const nextTrimmed = nextLine.trimStart()
         const indent = nextLine.length - nextTrimmed.length
-
         if (indent >= 2 && (nextTrimmed.startsWith("- ") || nextTrimmed.startsWith("* "))) {
           if (items.length > 0) items[items.length - 1].children.push(nextTrimmed.slice(2))
           j++
@@ -285,7 +236,6 @@ export function renderInlineMarkdown(content: string): ReactNode {
           break
         }
       }
-
       elements.push(
         <ul key={`ul-${i}`} className="mb-2 mt-1 list-disc pl-5 space-y-1">
           {items.map((item, k) => (
@@ -346,18 +296,9 @@ export function renderInlineMarkdown(content: string): ReactNode {
     if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
       const rows: string[][] = []
       let j = i
-      while (
-        j < lines.length &&
-        lines[j].trim().startsWith("|") &&
-        lines[j].trim().endsWith("|")
-      ) {
+      while (j < lines.length && lines[j].trim().startsWith("|") && lines[j].trim().endsWith("|")) {
         if (!/^\|[\s|:\-]+\|$/.test(lines[j].trim())) {
-          rows.push(
-            lines[j]
-              .split("|")
-              .filter(Boolean)
-              .map((c) => c.trim())
-          )
+          rows.push(lines[j].split("|").filter(Boolean).map((c) => c.trim()))
         }
         j++
       }
@@ -401,7 +342,6 @@ export function renderInlineMarkdown(content: string): ReactNode {
     )
   }
 
-  // Flush unclosed code block (stream interrupted mid-fence)
   if (inCodeBlock && codeBlockContent) {
     elements.push(
       <CodeBlock
@@ -415,44 +355,97 @@ export function renderInlineMarkdown(content: string): ReactNode {
   return elements
 }
 
-// ── Inline parser ──────────────────────────────────────────────────────────
+// ── Math block renderer ────────────────────────────────────────────────────
+function renderMathBlock(mathStr: string, key: string): ReactNode {
+  try {
+    const html = katex.renderToString(mathStr.trim(), {
+      displayMode: true,
+      throwOnError: false,
+      output: "html",
+      trust: true,
+      macros: {
+        "\\R": "\\mathbb{R}",
+        "\\N": "\\mathbb{N}",
+        "\\Z": "\\mathbb{Z}",
+      },
+    })
+    return (
+      <div
+        key={key}
+        className="my-4 overflow-x-auto rounded-md py-3 text-center"
+        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  } catch {
+    return (
+      <pre
+        key={key}
+        className="my-2 rounded bg-white/5 px-3 py-2 text-sm font-mono text-white/60 overflow-x-auto"
+      >
+        {mathStr}
+      </pre>
+    )
+  }
+}
 
+// ── Escape HTML tags so <error>, <warning>, etc. render as text ─────────────
+function escapeHtmlTags(s: string): string {
+  return s.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+// ── Inline parser ──────────────────────────────────────────────────────────
 function renderInline(line: string): ReactNode {
   const parts: ReactNode[] = []
-  let remaining = line
+  let remaining = escapeHtmlTags(line)
   let key = 0
 
   while (remaining.length > 0) {
-
-    // Inline $$...$$ — render as display math inline (avoids raw $$ leaking into paragraph)
-    if (remaining.startsWith("$$")) {
-      const ddMatch = remaining.match(/^\$\$([^$]*?)\$\$/)
-      if (ddMatch) {
-        parts.push(renderInlineMath(ddMatch[1].trim(), key++))
-        remaining = remaining.slice(ddMatch[0].length)
-        continue
-      }
-      // Unclosed $$ — emit both chars as plain text to avoid garbling
-      parts.push("$$")
-      remaining = remaining.slice(2)
-      continue
-    }
-
-    // Inline math  $...$  (single dollar, not $$)
-    // Guard: make sure it's not $$ by checking next char
+    // Inline math $...$  — guard against $$ by requiring no $ immediately after opening $
     if (remaining.startsWith("$") && !remaining.startsWith("$$")) {
       const dollarMathMatch = remaining.match(/^\$([^$\n]+?)\$/)
       if (dollarMathMatch) {
-        parts.push(renderInlineMath(dollarMathMatch[1], key++))
+        try {
+          const html = katex.renderToString(dollarMathMatch[1], {
+            displayMode: false,
+            throwOnError: false,
+            output: "html",
+          })
+          parts.push(
+            <span key={key++} dangerouslySetInnerHTML={{ __html: html }} className="inline-math mx-0.5" />
+          )
+        } catch {
+          parts.push(dollarMathMatch[0])
+        }
         remaining = remaining.slice(dollarMathMatch[0].length)
         continue
       }
     }
 
-    // Inline math  \(...\)
-    const inlineMathMatch = remaining.match(/^\\\((.+?)\\\)/)
+    // If we hit $$ here it means normalizeDollarBlocks missed something —
+    // just skip past both chars to avoid leaking them as text
+    if (remaining.startsWith("$$")) {
+      remaining = remaining.slice(2)
+      continue
+    }
+
+    // Inline math  \(...\)  — matches both \\( (escaped) and \( (single backslash)
+    // Also matches \[...\] used inline (single or double backslash)
+    const inlineMathMatch = remaining.match(/^(?:\\{1,2}\()([\s\S]+?)(?:\\{1,2}\))/) ||
+                            remaining.match(/^(?:\\{1,2}\[)([\s\S]+?)(?:\\{1,2}\])/)
     if (inlineMathMatch) {
-      parts.push(renderInlineMath(inlineMathMatch[1], key++))
+      try {
+        const html = katex.renderToString(inlineMathMatch[1], {
+          displayMode: false,
+          throwOnError: false,
+          output: "html",
+        })
+        parts.push(
+          <span key={key++} dangerouslySetInnerHTML={{ __html: html }} className="inline-math mx-0.5" />
+        )
+      } catch {
+        parts.push(inlineMathMatch[0])
+      }
       remaining = remaining.slice(inlineMathMatch[0].length)
       continue
     }
@@ -464,11 +457,7 @@ function renderInline(line: string): ReactNode {
         <span
           key={key++}
           className="inline-flex items-center rounded px-1.5 py-px text-[13px] font-mono"
-          style={{
-            background: "#1E1E1E",
-            border: "1px solid rgba(255,255,255,0.09)",
-            color: "#C8C8C8",
-          }}
+          style={{ background: "#1E1E1E", border: "1px solid rgba(255,255,255,0.09)", color: "#C8C8C8" }}
         >
           {codeMatch[1]}
         </span>

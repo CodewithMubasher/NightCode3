@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { getApiKey } from "@/lib/keys"
+import { getApiKey, getNextKey, hasAnyKey } from "@/lib/keys"
 
 type ModelGroup = { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }
 
@@ -15,8 +15,9 @@ async function getCached(fetchFn: () => Promise<ModelGroup[]>): Promise<ModelGro
   return data
 }
 
-const GROQ_KEY = () => getApiKey("GROQ_API_KEY")
-const GOOGLE_KEY = () => getApiKey("GOOGLE_GENERATIVE_AI_API_KEY")
+const GROQ_HAS_KEY = () => hasAnyKey("GROQ_API_KEY")
+const GROQ_KEY = () => getNextKey("GROQ_API_KEY")
+const GOOGLE_HAS_KEY = () => hasAnyKey("GOOGLE_GENERATIVE_AI_API_KEY")
 const OPENROUTER_KEY = () => getApiKey("OPENROUTER_API_KEY")
 const OPENCODE_KEY = () => getApiKey("OPENCODE_API_KEY")
 const OLLAMA_KEY = () => getApiKey("OLLAMA_CLOUD_API_KEY")
@@ -25,6 +26,7 @@ const CEREBRAS_KEY = () => getApiKey("CEREBRAS_API_KEY")
 const ROUTEWAY_KEY = () => getApiKey("ROUTEWAY_API_KEY")
 const NAGA_KEY = () => getApiKey("NAGA_API_KEY")
 const SAMBANOVA_KEY = () => getApiKey("SAMBANOVA_API_KEY")
+const FREETHEAI_KEY = () => getApiKey("FREETHEAI_API_KEY")
 const CLOUDFLARE_KEY = () => getApiKey("CLOUDFLARE_API_TOKEN")
 const PUTER_ENABLED = true
 
@@ -235,6 +237,27 @@ async function fetchXiaomiModels() {
   }
 }
 
+async function fetchFreeTheAIModels() {
+  try {
+    const res = await fetch("https://api.freetheai.xyz/v1/models", {
+      headers: { Authorization: `Bearer ${FREETHEAI_KEY()}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const models = (json.data || [])
+      .filter((m: any) => m.id)
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "freetheai" as const,
+        provider_display_name: "FreeTheAI",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
 async function fetchPuterModels() {
   try {
     const { default: puter } = await import("@heyputer/puter.js")
@@ -257,7 +280,7 @@ export async function GET() {
   return getCached(async () => {
     const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
-    if (GROQ_KEY()) {
+    if (GROQ_HAS_KEY()) {
     const groqModels = await fetchGroqModels()
     if (groqModels) {
       groups.push({
@@ -267,7 +290,7 @@ export async function GET() {
     }
   }
 
-  if (GOOGLE_KEY()) {
+  if (GOOGLE_HAS_KEY()) {
     groups.push({
       label: "Google",
       models: GOOGLE_MODELS,
@@ -359,6 +382,16 @@ export async function GET() {
       label: "Cloudflare",
       models: CLOUDFLARE_MODELS,
     })
+  }
+
+  if (FREETHEAI_KEY()) {
+    const faModels = await fetchFreeTheAIModels()
+    if (faModels) {
+      groups.push({
+        label: "FreeTheAI",
+        models: faModels,
+      })
+    }
   }
 
   if (PUTER_ENABLED) {

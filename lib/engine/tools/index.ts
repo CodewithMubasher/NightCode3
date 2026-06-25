@@ -15,6 +15,7 @@ import { grepTool } from "./grep"
 import { editFileTool } from "./edit-file"
 import { executeWorkspaceScriptTool } from "./execute-workspace-script"
 import { expertAgentTool } from "./expert-agent"
+import { generateImageTool } from "./generate-image"
 
 export interface ToolImplementation {
   name: string
@@ -57,4 +58,5 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   edit_file: editFileTool,
   execute_workspace_script: executeWorkspaceScriptTool,
   expert_agent: expertAgentTool,
+  generate_image: generateImageTool,
 }

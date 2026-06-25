@@ -1,6 +1,4 @@
-import { generateText } from "ai"
-import type { AIProvider } from "@/types"
-import { getLanguageModel } from "./planner"
+import { streamChat } from "./gateway"
 import {
   getStepsBySession,
   getToolCallsBySession,
@@ -39,7 +37,7 @@ export class CompactionService {
 
   async onStepComplete(
     stepNumber: number,
-    provider: AIProvider,
+    provider: string,
     modelId: string
   ): Promise<{ stepRangeStart: number; stepRangeEnd: number } | null> {
     this.stepCountSinceLastCompaction++
@@ -53,7 +51,7 @@ export class CompactionService {
 
   private async compact(
     currentStepNumber: number,
-    provider: AIProvider,
+    provider: string,
     modelId: string
   ): Promise<{ stepRangeStart: number; stepRangeEnd: number }> {
     const lastCompactions = getCompactionsBySession(this.sessionId)
@@ -110,11 +108,9 @@ export class CompactionService {
 
   private async summarizeSteps(
     stepData: unknown[],
-    provider: AIProvider,
+    provider: string,
     modelId: string
   ): Promise<CompactionSummary> {
-    const model = getLanguageModel(provider, modelId)
-
     const prompt = `You are a session compactor. Analyze the following agent execution steps and produce a concise structured summary.
 
 Respond with ONLY valid JSON matching this schema (use "(none)" for empty fields):
@@ -133,14 +129,17 @@ Steps data:
 ${JSON.stringify(stepData, null, 2)}`
 
     try {
-      const result = await generateText({
-        model,
-        messages: [
+      const result = await streamChat(
+        [
           { role: "system", content: "You are a session compactor. Output only valid JSON. No other text." },
           { role: "user", content: prompt },
         ],
-        temperature: 0.1,
-      })
+        provider,
+        modelId,
+        undefined,
+        undefined,
+        {},
+      )
 
       return JSON.parse(result.text) as CompactionSummary
     } catch {

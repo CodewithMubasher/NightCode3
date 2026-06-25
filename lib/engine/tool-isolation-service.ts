@@ -249,6 +249,12 @@ export class ToolIsolationService {
       case "ask":
         return record
 
+      // generate_image: the result contains a base64 data URL that must NOT
+      // be truncated — it is streamed to the client via tool_end for inline
+      // rendering. The default pass-through below preserves it as-is.
+      case "generate_image":
+        return record
+
       default:
         return record
     }

@@ -27,6 +27,7 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "search_memories" },
     { name: "grep" },
     { name: "edit_file" },
+    { name: "generate_image" },
   ],
   maxIterations: 20,
   allowAutoFix: true,

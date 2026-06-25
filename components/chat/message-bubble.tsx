@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react"
-import type { Message, ToolState } from "@/types"
+import type { Message, ToolState, GeneratedImage } from "@/types"
 import {
   Copy, Check, ThumbsUp, ThumbsDown, Eclipse, RotateCcw,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
   FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot, Brain,
+  Download, ImageOff, Image as ImageIcon,
 } from "lucide-react"
 import {
   Attachments,
@@ -17,9 +18,134 @@ import { cn } from "@/lib/utils"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { toast } from "sonner"
 
+const MAX_IMAGE_WIDTH = 500
+
+// ── Shimmer + image card ─────────────────────────────────────────────────────
+function GeneratedImageCard({ image }: { image: GeneratedImage }) {
+  const [hovered, setHovered] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [naturalDims, setNaturalDims] = useState<{ w: number; h: number } | null>(null)
+
+  function handleDownload() {
+    if (!image.url) return
+    const a = document.createElement("a")
+    a.href = image.url
+    a.download = `nightcode-image-${image.id}.png`
+    a.click()
+  }
+
+  // Shimmer skeleton while generating — fixed aspect placeholder
+  if (image.generating) {
+    return (
+      <div
+        className="relative overflow-hidden rounded-xl"
+        style={{
+          width: MAX_IMAGE_WIDTH,
+          height: 200,
+          background: "linear-gradient(90deg, #1a1a1a 25%, #2a2a2a 50%, #1a1a1a 75%)",
+          backgroundSize: "200% 100%",
+          animation: "image-shimmer 1.6s ease-in-out infinite",
+        }}
+      >
+        <style>{`
+          @keyframes image-shimmer {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        `}</style>
+      </div>
+    )
+  }
+
+  // Failed state — compact inline badge
+  if (image.error || !image.url || loadError) {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-lg border border-red-900/30 bg-red-950/20 px-3 py-1.5"
+        title={image.prompt}
+      >
+        <ImageOff className="size-4 text-red-400/60 shrink-0" />
+        <span className="text-xs text-red-400/60 font-sans">Image generation failed</span>
+      </div>
+    )
+  }
+
+  // Compute display dimensions from natural aspect ratio
+  let displayWidth: number
+  let displayHeight: number
+  if (naturalDims) {
+    const scale = naturalDims.w <= MAX_IMAGE_WIDTH ? 1 : MAX_IMAGE_WIDTH / naturalDims.w
+    displayWidth = Math.round(naturalDims.w * scale)
+    displayHeight = Math.round(naturalDims.h * scale)
+  } else {
+    displayWidth = MAX_IMAGE_WIDTH
+    displayHeight = 200
+  }
+
+  // Loaded image with hover download
+  return (
+    <div
+      className="relative rounded-xl group cursor-pointer"
+      style={{ width: displayWidth, height: displayHeight, display: "inline-block" }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={handleDownload}
+    >
+      {/* Actual image */}
+      <img
+        src={image.url}
+        alt={image.prompt}
+        className="rounded-xl"
+        style={{
+          display: loaded ? "block" : "none",
+          width: "100%",
+          height: "100%",
+        }}
+        onLoad={(e) => {
+          const img = e.currentTarget
+          setNaturalDims({ w: img.naturalWidth, h: img.naturalHeight })
+          setLoaded(true)
+        }}
+        onError={() => setLoadError(true)}
+      />
+
+      {/* Shimmer while <img> itself is loading from data URL */}
+      {!loaded && (
+        <div
+          className="absolute inset-0 rounded-xl"
+          style={{
+            background: "linear-gradient(90deg, #1a1a1a 25%, #2a2a2a 50%, #1a1a1a 75%)",
+            backgroundSize: "200% 100%",
+            animation: "image-shimmer 1.6s ease-in-out infinite",
+          }}
+        />
+      )}
+
+      {/* Hover overlay — download icon top-right */}
+      <button
+        onClick={(e) => { e.stopPropagation(); handleDownload() }}
+        className="absolute top-2 right-2 flex items-center justify-center rounded-lg transition-all"
+        style={{
+          width: 28,
+          height: 28,
+          background: "rgba(0,0,0,0.6)",
+          backdropFilter: "blur(8px)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          opacity: hovered ? 1 : 0,
+          pointerEvents: hovered ? "auto" : "none",
+        }}
+        aria-label="Download image"
+      >
+        <Download size={14} className="text-white" />
+      </button>
+    </div>
+  )
+}
+
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)/)
-  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent"].includes(toolName)) {
+  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent","generate_image"].includes(toolName)) {
     return Cable
   }
   switch (toolName) {
@@ -36,6 +162,7 @@ function toolIcon(toolName: string) {
     case "skill": return BookOpen
     case "delegate_task": return Bot
     case "expert_agent": return Bot
+    case "generate_image": return ImageIcon
     default: return Circle
   }
 }
@@ -120,6 +247,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
 
   const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
   const isDelegate = toolState.tool === "delegate_task" || toolState.tool === "expert_agent"
+  const isImageGen = toolState.tool === "generate_image"
 
   const toolLabels: Record<string, (a: string | null) => string> = {
     write_file: () => "Created",
@@ -137,6 +265,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     skill: () => "Read skill",
     delegate_task: () => "Sub-agent",
     expert_agent: () => "Expert Agent",
+    generate_image: () => isRunning ? "Generating image" : "Generated image",
   }
   const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
 
@@ -144,7 +273,12 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     <div className="relative flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
         <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
-          <Icon className="size-3.5" style={{ color: isRunning && toolState.tool !== "create_artifact" ? "#10B981" : iconColor }} />
+          <Icon
+            className="size-3.5"
+            style={{
+              color: isRunning && !isImageGen ? "#10B981" : isRunning && isImageGen ? "#D97757" : iconColor,
+            }}
+          />
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="text-[14px] font-sans" style={{ color: textColor }}>
@@ -171,7 +305,19 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
               {args}
             </span>
           )}
-          {args && !isFilePath && !isDelegate && (
+          {args && !isFilePath && !isDelegate && !isImageGen && (
+            <span
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
+              style={{
+                background: "#1A1A1A",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "#B3B3B3",
+              }}
+            >
+              {args}
+            </span>
+          )}
+          {isImageGen && args && (
             <span
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-sans"
               style={{
@@ -363,13 +509,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const hasReasoning = !!(message.reasoning && message.reasoning.length > 0)
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const isStreamingReasoning = message.status === "streaming" && hasReasoning
-  const [expanded, setExpanded] = useState(isStreamingTool || isStreamingReasoning)
+  const [expanded, setExpanded] = useState(false)
   const timelineRef = useRef<HTMLDivElement>(null)
   const [contentHeight, setContentHeight] = useState(0)
-
-  useEffect(() => {
-    if (isStreamingTool || isStreamingReasoning) setExpanded(true)
-  }, [isStreamingTool, isStreamingReasoning])
 
   useLayoutEffect(() => {
     if (timelineRef.current) {
@@ -417,6 +559,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     )
   }
 
+  const generatedImages = message.generatedImages ?? []
+
   return (
     <div>
       <style>{`
@@ -427,6 +571,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         @keyframes thinking-shimmer {
           0%, 100% { background-position: 200% center; }
           50% { background-position: 0% center; }
+        }
+        @keyframes image-shimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes image-fade-in {
+          from { opacity: 0; transform: scale(0.97); }
+          to   { opacity: 1; transform: scale(1); }
         }
       `}</style>
       <div className="flex items-start gap-3">
@@ -450,7 +602,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               />
             </button>
           )}
-          {message.status === "streaming" && toolCount === 0 && !message.content && !hasReasoning && (
+          {message.status === "streaming" && toolCount === 0 && !message.content && !hasReasoning && generatedImages.length === 0 && (
             <div className="flex items-center gap-1.5 py-1">
               <span
                 className="text-sm font-sans"
@@ -485,6 +637,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {message.content && (
             <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
               {renderInlineMarkdown(message.content)}
+            </div>
+          )}
+
+          {/* ── Generated images — inline in chat (below text) ──────────────── */}
+          {generatedImages.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-3">
+              {generatedImages.map((img, index) => (
+                <GeneratedImageCard key={`${img.id}-${index}`} image={img} />
+              ))}
             </div>
           )}
           {message.status === "interrupted" && (
