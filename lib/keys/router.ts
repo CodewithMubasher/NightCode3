@@ -30,7 +30,6 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   sambanova: { envBase: "SAMBANOVA_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   freetheai: { envBase: "FREETHEAI_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   cloudflare:{ envBase: "CLOUDFLARE_API_TOKEN",       maxSuffixed: 0,  authType: "BEARER" },
-  local:     { envBase: "LOCAL_AI_DUMMY",             maxSuffixed: 0,  authType: "BEARER" },
 }
 
 let slots: Map<string, KeySlot[]> = new Map()
@@ -88,9 +87,6 @@ function getSlots(provider: string): KeySlot[] {
 }
 
 export function getNextKey(provider: string): KeySlot | null {
-  if (provider === "local") {
-    return { value: "local-no-auth", type: "BEARER", provider: "local", penalizedUntil: 0 }
-  }
   const pool = getSlots(provider)
   if (pool.length === 0) return null
 
@@ -130,8 +126,6 @@ export function hasAnyKey(provider: string): boolean {
 
 export function getBaseUrl(provider: string, model: string, includeKey: boolean, keySlot: KeySlot | null): string {
   switch (provider) {
-    case "local":
-      return "http://127.0.0.1:8000/api/chat"
     case "google":
     case "google_image":
       if (keySlot && keySlot.type === "API_KEY") {
@@ -170,10 +164,6 @@ export function getBaseUrl(provider: string, model: string, includeKey: boolean,
 export function buildAuthHeaders(provider: string, keySlot: KeySlot): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-  }
-
-  if (provider === "local") {
-    return headers
   }
 
   if (provider === "google" || provider === "google_image") {
