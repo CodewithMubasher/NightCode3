@@ -36,6 +36,7 @@ export function getProviderLimits(provider: string, model: string): ProviderLimi
     naga:       { rpm: 15,  rpd: 120,    tpm: 40000,   tpd: 150000 },
     sambanova:  { rpm: 30,  rpd: 1000,   tpm: 80000,   tpd: 2000000 },
     cloudflare: { rpm: 300, rpd: 100,    tpm: null,    tpd: null },
+    nvidia:     { rpm: 40,  rpd: null,    tpm: null,    tpd: null },
   }
 
   return fallback[provider] ?? { rpm: null, rpd: null, tpm: null, tpd: null }

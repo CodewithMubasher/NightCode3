@@ -41,20 +41,15 @@ export default function ChatPage() {
     }
 
     el.addEventListener("scroll", onScroll, { passive: true })
-
-    const observer = new MutationObserver(() => {
-      if (!userScrolled.current) {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
-      }
-    })
-
-    observer.observe(el, { childList: true, subtree: true, characterData: true })
-
-    return () => {
-      el.removeEventListener("scroll", onScroll)
-      observer.disconnect()
-    }
+    return () => el.removeEventListener("scroll", onScroll)
   }, [id])
+
+  useEffect(() => {
+    if (userScrolled.current || !chat) return
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+  }, [chat?.messages.length, isStreaming])
 
   if (!chat) return null
 

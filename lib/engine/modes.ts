@@ -8,6 +8,29 @@ export interface ModeConfig {
   allowAutoFix: boolean
   retryPolicy: "none" | "lenient" | "strict"
   intentDefault: "tool_required" | "tool_optional" | "tool_forbidden"
+  modeType: "plan" | "build" | "caat"
+}
+
+export const PLAN_CONFIG: ModeConfig = {
+  tools: [
+    { name: "read_file" },
+    { name: "list_directory" },
+    { name: "search_files" },
+    { name: "grep" },
+    { name: "ask" },
+    { name: "create_artifact" },
+    { name: "list_artifacts" },
+    { name: "read_artifact" },
+    { name: "edit_artifact" },
+    { name: "search_memories" },
+    { name: "task" },
+    { name: "plan_exit" },
+  ],
+  maxIterations: 30,
+  allowAutoFix: false,
+  retryPolicy: "strict",
+  intentDefault: "tool_required",
+  modeType: "plan",
 }
 
 export const AGENT_CONFIG: ModeConfig = {
@@ -28,11 +51,13 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "grep" },
     { name: "edit_file" },
     { name: "generate_image" },
+    { name: "task" },
   ],
   maxIterations: 20,
   allowAutoFix: true,
   retryPolicy: "lenient",
   intentDefault: "tool_optional",
+  modeType: "build",
 }
 
 export const CAAT_CONFIG: ModeConfig = {
@@ -43,4 +68,5 @@ export const CAAT_CONFIG: ModeConfig = {
   allowAutoFix: true,
   retryPolicy: "lenient",
   intentDefault: "tool_required",
+  modeType: "caat",
 }

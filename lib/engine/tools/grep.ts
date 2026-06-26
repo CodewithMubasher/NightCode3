@@ -51,10 +51,7 @@ export const grepTool = {
   description: "Search file contents for a pattern. Returns matching lines with file paths and line numbers. Use this to find where functions are called, variables are defined, or patterns appear in the codebase.",
   schema: { pattern: "string", path: "string", fileTypes: "string", maxResults: "number" },
   async execute(args: { pattern: string; path?: string; fileTypes?: string; maxResults?: number }) {
-    const root = args.path ? path.resolve(WORKSPACE, args.path) : WORKSPACE
-    if (!root.startsWith(WORKSPACE)) {
-      return { success: false, error: "Path is outside workspace" }
-    }
+    const root = args.path ? (path.isAbsolute(args.path) ? args.path : path.resolve(WORKSPACE, args.path)) : WORKSPACE
 
     const filePattern = args.fileTypes
       ? new RegExp(args.fileTypes.replace(/\*/g, ".*").replace(/,/g, "|"))

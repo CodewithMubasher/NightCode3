@@ -115,11 +115,6 @@ async function parseOpenAIStream(
               collectedText += delta.content
             }
 
-            if (delta.reasoning_content) {
-              callbacks.onReasoning?.(delta.reasoning_content)
-              collectedReasoning += delta.reasoning_content
-            }
-
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
                 if (tc.function?.name) {
@@ -133,9 +128,13 @@ async function parseOpenAIStream(
                   const last = collectedToolCalls[collectedToolCalls.length - 1]
                   try {
                     const parsed = JSON.parse(tc.function.arguments)
-                    last.args = { ...last.args, ...parsed }
+                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                      last.args = { ...last.args, ...parsed }
+                    } else {
+                      last.args = null
+                    }
                   } catch {
-                    last.args = { ...last.args, _raw: tc.function.arguments }
+                    last.args = null
                   }
                 }
               }
@@ -155,10 +154,72 @@ async function parseOpenAIStream(
       }
     }
 
+  // Fallback: if no structured tool calls found, try inline JSON extraction
+  if (collectedToolCalls.length === 0) {
+    const inlineCalls = extractInlineToolCalls(collectedText)
+    collectedToolCalls.push(...inlineCalls)
+    if (inlineCalls.length > 0) {
+      // Clear collected text since tool calls were embedded in it
+      collectedText = ""
+    }
+  }
+
   return { text: collectedText, reasoning: collectedReasoning, toolCalls: collectedToolCalls, usage }
 }
 
-// ─── Parse Google Gemini SSE stream ───────────────────────────────────────
+// ─── Fallback: parse inline JSON tool calls from text ─────────────────────
+// Some providers (Groq, NVIDIA) sometimes emit tool calls as JSON in the
+// text content instead of structured delta.tool_calls. This catches them.
+function extractInlineToolCalls(text: string): StreamResult["toolCalls"] {
+  const toolCalls: StreamResult["toolCalls"] = []
+  const jsonBlockRegex = /```json\s*(\{[\s\S]*?\})\s*```/g
+  const inlineJsonRegex = /\{[\s\S]*?"(?:name|function\s*\.?\s*name)"\s*:[\s\S]*?"(?:arguments|function\s*\.?\s*arguments)"\s*:[\s\S]*?\}/g
+
+  const candidates: string[] = []
+
+  let match: RegExpExecArray | null
+  while ((match = jsonBlockRegex.exec(text)) !== null) {
+    candidates.push(match[1])
+  }
+
+  while ((match = inlineJsonRegex.exec(text)) !== null) {
+    candidates.push(match[0])
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate)
+      const name =
+        (parsed as any).name ??
+        (parsed as any).function?.name ??
+        (parsed as any).tool_name ??
+        (parsed as any).toolName
+      let args =
+        (parsed as any).arguments ??
+        (parsed as any).function?.arguments ??
+        (parsed as any).args ??
+        (parsed as any).parameters
+      if (name && args) {
+        if (typeof args === "string") {
+          try { args = JSON.parse(args) } catch { args = {} }
+        }
+        if (typeof args === "object" && args !== null && !Array.isArray(args)) {
+          if (!toolCalls.some((tc) => tc.toolName === name)) {
+            toolCalls.push({
+              toolCallId: `call_inline_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              toolName: name,
+              args: args as Record<string, unknown>,
+            })
+          }
+        }
+      }
+    } catch {
+      // skip malformed JSON
+    }
+  }
+
+  return toolCalls
+}
 async function parseGeminiStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
@@ -287,7 +348,7 @@ export async function streamChat(
   // OpenAI-compatible providers use /v1/chat/completions
   const openAIProviders = new Set([
     "groq", "openai", "openrouter", "opencode", "xiaomi",
-    "cerebras", "routeway", "naga", "sambanova", "freetheai", "cloudflare",
+    "cerebras", "routeway", "naga", "sambanova", "freetheai", "cloudflare", "nvidia",
   ])
 
   if (provider === "google" || provider === "google_image") {
@@ -298,20 +359,32 @@ export async function streamChat(
       url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?alt=sse`
     }
 
+    const geminiMessages: Array<{ role: string; parts: Array<Record<string, unknown>> }> = []
+    for (const m of messages) {
+      if (m.role === "tool") {
+        const toolResult = Array.isArray(m.content) ? m.content.find((p: any) => p.type === "tool-result") : null
+        const output = toolResult?.output ?? m.content
+        const text = typeof output === "string" ? output : JSON.stringify(output)
+        geminiMessages.push({ role: "user", parts: [{ text: `[Tool Result] ${text}` }] })
+      } else {
+        geminiMessages.push({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: typeof m.content === "string"
+            ? [{ text: m.content }]
+            : Array.isArray(m.content)
+              ? m.content.map((p: any) => {
+                  if (p.type === "text") return { text: p.text }
+                  if (p.type === "image") return { inlineData: { mimeType: p.mimeType ?? "image/png", data: p.image } }
+                  if (p.type === "file") return { inlineData: { mimeType: p.mimeType ?? "application/pdf", data: p.data } }
+                  return { text: JSON.stringify(p) }
+                })
+              : [{ text: JSON.stringify(m.content) }],
+        })
+      }
+    }
+
     const body: Record<string, unknown> = {
-      contents: messages.map((m) => ({
-        role: m.role === "assistant" ? "model" : m.role,
-        parts: typeof m.content === "string"
-          ? [{ text: m.content }]
-          : Array.isArray(m.content)
-            ? m.content.map((p: any) => {
-                if (p.type === "text") return { text: p.text }
-                if (p.type === "image") return { inlineData: { mimeType: p.mimeType ?? "image/png", data: p.image } }
-                if (p.type === "file") return { inlineData: { mimeType: p.mimeType ?? "application/pdf", data: p.data } }
-                return { text: JSON.stringify(p) }
-              })
-            : [{ text: JSON.stringify(m.content) }],
-      })),
+      contents: geminiMessages,
     }
 
     if (systemPrompt) {

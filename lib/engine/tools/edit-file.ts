@@ -86,12 +86,82 @@ function blockAnchor(content: string, oldStr: string, newStr: string): string | 
   return null
 }
 
+function escapeNormalized(content: string, oldStr: string, newStr: string): string | null {
+  const unescape = (s: string) => s.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"')
+  const normalizedContent = unescape(content)
+  const normalizedOld = unescape(oldStr)
+  if (normalizedContent.includes(normalizedOld)) {
+    return normalizedContent.replace(normalizedOld, newStr)
+  }
+  return null
+}
+
+function trimmedBoundary(content: string, oldStr: string, newStr: string): string | null {
+  const trimmedOld = oldStr.trim()
+  const contentLines = content.split("\n")
+  for (let i = 0; i < contentLines.length; i++) {
+    if (contentLines[i].trim() === trimmedOld) {
+      contentLines[i] = newStr
+      return contentLines.join("\n")
+    }
+  }
+  return null
+}
+
+function multiOccurrence(content: string, oldStr: string, newStr: string): string | null {
+  const count = content.split(oldStr).length - 1
+  if (count === 1) {
+    return content.replace(oldStr, newStr)
+  }
+  return null
+}
+
+function contextAware(content: string, oldStr: string, newStr: string): string | null {
+  const oldLines = oldStr.split("\n").filter((l) => l.trim().length > 0)
+  if (oldLines.length < 2) return null
+  const contentLines = content.split("\n")
+  const firstTrimmed = oldLines[0].trim()
+  const lastTrimmed = oldLines[oldLines.length - 1].trim()
+
+  let startIdx = -1
+  let endIdx = -1
+
+  for (let i = 0; i < contentLines.length; i++) {
+    if (contentLines[i].trim() === firstTrimmed) {
+      startIdx = i
+      break
+    }
+  }
+
+  if (startIdx === -1) return null
+
+  for (let i = startIdx + 1; i < contentLines.length; i++) {
+    if (contentLines[i].trim() === lastTrimmed) {
+      endIdx = i
+      break
+    }
+  }
+
+  if (endIdx === -1) return null
+
+  const before = contentLines.slice(0, startIdx).join("\n")
+  const after = contentLines.slice(endIdx + 1).join("\n")
+  const prefix = startIdx > 0 ? "\n" : ""
+  const suffix = endIdx < contentLines.length - 1 ? "\n" : ""
+
+  return before + prefix + newStr + suffix + after
+}
+
 const replacers = [
   { name: "simple", fn: simple },
   { name: "lineTrimmed", fn: lineTrimmed },
   { name: "whitespaceNormalized", fn: whitespaceNormalized },
   { name: "indentationFlexible", fn: indentationFlexible },
   { name: "blockAnchor", fn: blockAnchor },
+  { name: "escapeNormalized", fn: escapeNormalized },
+  { name: "trimmedBoundary", fn: trimmedBoundary },
+  { name: "multiOccurrence", fn: multiOccurrence },
+  { name: "contextAware", fn: contextAware },
 ]
 
 // ── Tool export ────────────────────────────────────────────────────────────

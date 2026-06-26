@@ -1,5 +1,6 @@
 import type { ToolImplementation } from "./tools"
 import { streamChat, type UsageInfo, type StreamResult } from "./gateway"
+import { compressToolSchemas } from "./schema-compressor"
 
 export type { UsageInfo }
 
@@ -67,8 +68,7 @@ export async function planStep(
   }
 
   async function doStreamText(): Promise<StreamResult> {
-    // Convert ToolImplementation[] → gateway tool format (schema strings only)
-    const tools = availableTools.map((t) => ({
+    const rawTools = availableTools.map((t) => ({
       name: t.name,
       description: t.description,
       schema: Object.entries(t.schema).reduce((acc, [key, val]) => {
@@ -76,6 +76,8 @@ export async function planStep(
         return acc
       }, {} as Record<string, string>),
     }))
+
+    const tools = compressToolSchemas(rawTools, provider)
 
     const result = await streamChat(
       messages,
@@ -101,13 +103,21 @@ export async function planStep(
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error"
     const cause = (err as any)?.cause
+
+    const statusMatch = msg.match(/\b(4\d\d|5\d\d)\b/)
+    const httpStatus = statusMatch ? parseInt(statusMatch[1]) : 0
+
+    if (httpStatus === 429 || httpStatus === 413) {
+      console.error(`[planner] API quota/limit error (HTTP ${httpStatus}): ${msg}. Aborting tool loop.`)
+      throw err
+    }
+
     console.error(
       `[planner] Tool calling failed: ${msg}.` +
       (cause ? ` Cause: ${cause instanceof Error ? cause.message : JSON.stringify(cause)}.` : "") +
       ` Retrying without tools.`
     )
 
-    // Fallback: text-only request (no tools)
     const textOnlyMessages = messages.filter((m) => m.role !== "tool").map((m) => {
       if (m.role === "assistant" && Array.isArray(m.content)) {
         const textParts = (m.content as Array<{ type: string; text?: string }>).filter((p) => p.type === "text")

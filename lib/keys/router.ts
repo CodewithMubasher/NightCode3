@@ -30,6 +30,7 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   sambanova: { envBase: "SAMBANOVA_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   freetheai: { envBase: "FREETHEAI_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   cloudflare:{ envBase: "CLOUDFLARE_API_TOKEN",       maxSuffixed: 0,  authType: "BEARER" },
+  nvidia:    { envBase: "NVIDIA_API_KEY",             maxSuffixed: 0,  authType: "BEARER" },
 }
 
 let slots: Map<string, KeySlot[]> = new Map()
@@ -154,6 +155,8 @@ export function getBaseUrl(provider: string, model: string, includeKey: boolean,
       return `https://api.freetheai.xyz/v1/chat/completions`
     case "cloudflare":
       return `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID ?? ""}/ai/v1/chat/completions`
+    case "nvidia":
+      return `https://integrate.api.nvidia.com/v1/chat/completions`
     case "ollama":
       return `https://ollama.com/api/chat`
     default:

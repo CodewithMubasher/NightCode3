@@ -49,6 +49,17 @@ export class CompactionService {
     return range
   }
 
+  async onOverflow(
+    stepNumber: number,
+    provider: string,
+    modelId: string
+  ): Promise<{ stepRangeStart: number; stepRangeEnd: number } | null> {
+    console.log(`[compaction] Context overflow detected at step ${stepNumber}, triggering on-demand compaction`)
+    const range = await this.compact(stepNumber, provider, modelId)
+    this.stepCountSinceLastCompaction = 0
+    return range
+  }
+
   private async compact(
     currentStepNumber: number,
     provider: string,
@@ -78,6 +89,10 @@ export class CompactionService {
           let result: unknown = null
           if (resultData) {
             try { result = JSON.parse(resultData) } catch { result = resultData }
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result)
+            if (resultStr.length > 2000) {
+              result = resultStr.slice(0, 2000) + "\n... [truncated for compaction]"
+            }
           }
           return {
             tool: tc.tool_name,

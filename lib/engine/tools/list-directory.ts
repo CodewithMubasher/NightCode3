@@ -4,12 +4,12 @@ import * as path from "path"
 const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 function resolvePath(dirPath: string): string {
-  const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
-  const normalized = path.normalize(resolved)
-  if (!normalized.startsWith(WORKSPACE)) {
-    throw new Error(`Path traversal denied: "${dirPath}" is outside the workspace`)
+  let resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
+  resolved = path.normalize(resolved)
+  if (process.platform === "win32") {
+    resolved = resolved.replace(/\//g, "\\")
   }
-  return normalized
+  return resolved
 }
 
 // In-memory directory listing cache with TTL — avoids redundant listings within a session

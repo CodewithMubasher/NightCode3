@@ -4,12 +4,12 @@ import * as path from "path"
 const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
 
 function resolvePath(filePath: string): string {
-  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE, filePath)
-  const normalized = path.normalize(resolved)
-  if (!normalized.startsWith(WORKSPACE)) {
-    throw new Error(`Path traversal denied: "${filePath}" is outside the workspace`)
+  let resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE, filePath)
+  resolved = path.normalize(resolved)
+  if (process.platform === "win32") {
+    resolved = resolved.replace(/\//g, "\\")
   }
-  return normalized
+  return resolved
 }
 
 export const readFileTool = {

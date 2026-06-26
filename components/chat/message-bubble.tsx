@@ -509,7 +509,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const hasReasoning = !!(message.reasoning && message.reasoning.length > 0)
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const isStreamingReasoning = message.status === "streaming" && hasReasoning
-  const [expanded, setExpanded] = useState(false)
+  const hasRunningTools = Object.values(message.toolStates).some((t) => t.status === "running")
+  const [expanded, setExpanded] = useState(isStreamingTool || hasReasoning)
+
+  // Auto-expand when tools start running during streaming
+  useEffect(() => {
+    if (isStreamingTool || isStreamingReasoning) {
+      setExpanded(true)
+    }
+  }, [isStreamingTool, isStreamingReasoning])
   const timelineRef = useRef<HTMLDivElement>(null)
   const [contentHeight, setContentHeight] = useState(0)
 
@@ -634,7 +642,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           </div>
 
-          {message.content && (
+          {message.content && !hasRunningTools && (
             <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
               {renderInlineMarkdown(message.content)}
             </div>

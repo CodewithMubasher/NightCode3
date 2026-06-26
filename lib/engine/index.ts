@@ -2,7 +2,7 @@ import type { Message, AIProvider } from "@/types"
 import * as fs from "fs"
 import * as path from "path"
 import { EventEmitter } from "./event-emitter"
-import { AGENT_CONFIG, CAAT_CONFIG, type ModeConfig } from "./modes"
+import { AGENT_CONFIG, CAAT_CONFIG, PLAN_CONFIG, type ModeConfig } from "./modes"
 import { buildSystemPrompt, buildContext, buildRequest, buildDynamicBlock, invalidateCompactionCache } from "./context-builder"
 import { planStep, type UsageInfo } from "./planner"
 import { flushBatch } from "@/lib/db/batch"
@@ -13,13 +13,73 @@ import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
 import { CompactionService } from "./compaction-service"
 import { Semaphore } from "./semaphore"
+import { classifyIntent } from "./intent-classifier"
 import { createStep, createFileSnapshot } from "@/lib/db/adapter"
 import type { DBFileSnapshot } from "@/lib/db/types"
 import { boundToolOutput } from "./tool-output-store"
 import { DoomLoopTracker } from "./doom-loop-tracker"
+import { classifyTools } from "./tool-classifier"
+import { needsPermission, rememberPermission } from "./permission"
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 7)
+}
+
+function estimateMessageTokens(msg: { role: string; content: unknown }): number {
+  if (typeof msg.content === "string") return estimateTokens(msg.content)
+  if (Array.isArray(msg.content)) {
+    return msg.content.reduce((acc, part) => {
+      if (typeof part === "object" && part !== null) {
+        const p = part as Record<string, unknown>
+        if (p.type === "text" && typeof p.text === "string") return acc + estimateTokens(p.text)
+        if (p.type === "tool-call" && p.input) return acc + estimateTokens(JSON.stringify(p.input))
+        if (p.type === "tool-result") return acc + 20 // tool results are summarized, don't double-count
+      }
+      return acc
+    }, 0)
+  }
+  return 0
+}
+
+const CLEAR_THRESHOLD_TOKENS = 12000
+const PROTECTED_TOOLS = new Set(["skill"])
+
+function clearOldToolOutputs(messages: Array<{ role: string; content: unknown }>, keepRecent = 2, mode?: string): number {
+  if (mode === "plan") return 0 // never clear during PLAN mode — model needs all investigation context
+  let cleared = 0
+  const toolMessages = messages
+    .map((m, i) => ({ msg: m, index: i }))
+    .filter(({ msg }) => msg.role === "tool" && Array.isArray(msg.content))
+
+  if (toolMessages.length <= keepRecent) return 0
+
+  const toClear = toolMessages.slice(0, -keepRecent)
+  for (const { msg } of toClear) {
+    const parts = msg.content as Array<Record<string, unknown>>
+    for (const part of parts) {
+      if (part.type !== "tool-result") continue
+      const toolName = part.toolName as string
+      if (PROTECTED_TOOLS.has(toolName)) continue
+      const output = part.output as Record<string, unknown> | undefined
+      if (!output || typeof output !== "object") continue
+      const val = output.value
+      if (typeof val === "string" && val.length > CLEAR_THRESHOLD_TOKENS) {
+        part.output = { type: "json" as const, value: `[Tool result processed: ${toolName}]` }
+        cleared++
+      } else if (typeof val === "object" && val !== null) {
+        const str = JSON.stringify(val)
+        if (str.length > CLEAR_THRESHOLD_TOKENS) {
+          part.output = { type: "json" as const, value: `[Tool result processed: ${toolName}]` }
+          cleared++
+        }
+      }
+    }
+  }
+  return cleared
 }
 
 function countFilesRecursive(dir: string): number {
@@ -117,9 +177,15 @@ export class NightCodeEngine {
     options?: EngineRunOptions
   ): Promise<string> {
     const mode = options?.mode ?? "standard"
-    const config: ModeConfig = mode === "caat" ? CAAT_CONFIG : AGENT_CONFIG
+    let currentMode: string = mode
+    if (mode === "standard") {
+      const lastUserMsg = messages.filter((m) => m.role === "user").pop()
+      const intent = lastUserMsg ? classifyIntent(lastUserMsg.content) : "quick"
+      currentMode = intent === "deep" ? "plan" : "standard"
+    }
+    let currentConfig: ModeConfig = currentMode === "caat" ? CAAT_CONFIG : currentMode === "plan" ? PLAN_CONFIG : AGENT_CONFIG
 
-    const basePrompt = buildSystemPrompt(mode, mcpTools, model)
+    const basePrompt = buildSystemPrompt(currentMode, mcpTools, model)
     const fullSystemPrompt = skillInjected
       ? basePrompt + "\n\n" + skillInjected
       : basePrompt
@@ -131,7 +197,7 @@ export class NightCodeEngine {
     }
 
     // Build available tools
-    let availableTools: ToolImplementation[] = config.tools
+    let availableTools: ToolImplementation[] = currentConfig.tools
       .map((t) => TOOL_REGISTRY[t.name])
       .filter(Boolean)
 
@@ -148,6 +214,13 @@ export class NightCodeEngine {
     if (options?.tools) {
       const allowed = new Set(options.tools)
       availableTools = availableTools.filter((t) => allowed.has(t.name))
+    }
+
+    const userMessage = messages[messages.length - 1]
+    if (userMessage && userMessage.role === "user" && typeof userMessage.content === "string") {
+      const before = availableTools.length
+      availableTools = classifyTools(userMessage.content, availableTools)
+      console.log(`[engine] Tool filtering: ${before} → ${availableTools.length} tools`)
     }
 
     // Build request — separate system prompt from conversation messages
@@ -167,17 +240,45 @@ export class NightCodeEngine {
       content: typeof m.content === "string" ? m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim() : m.content,
     }))
     let stepNumber = 0
-    const MAX_STEPS = config.maxIterations
+    const MAX_STEPS = currentConfig.maxIterations
     let toolCallCount = 0
     let finalText = ""
-    let accumulatedReasoning = ""
     let consecutiveErrors = 0
+    let malformedCount = 0
     let cumulativeInputTokens = 0
     let cumulativeOutputTokens = 0
     let cumulativeReasoningTokens = 0
     let totalDurationMs = 0
     // Track which step produced which messages so we can remove them post-compaction
     const stepMessages = new Map<number, Array<{ role: string; content: unknown }>>()
+    // Investigation state for PLAN mode — persists across steps
+    const investigation = {
+      visitedFiles: new Set<string>(),
+      visitedDirs: new Set<string>(),
+      discoveredFacts: new Set<string>(),
+      toolCallHistory: new Array<{ tool: string; args: string }>(),
+      addFile(file: string) { this.visitedFiles.add(file) },
+      addDir(dir: string) { this.visitedDirs.add(dir) },
+      addFact(fact: string) { this.discoveredFacts.add(fact) },
+      hasVisited(file: string) { return this.visitedFiles.has(file) },
+      alreadyCalled(tool: string, args: Record<string, unknown>): boolean {
+        const key = `${tool}::${JSON.stringify(args)}`
+        if (this.toolCallHistory.some((t) => `${t.tool}::${t.args}` === key)) return true
+        this.toolCallHistory.push({ tool, args: JSON.stringify(args) })
+        return false
+      },
+      getSummary(): string {
+        const files = [...this.visitedFiles].join(", ")
+        const dirs = [...this.visitedDirs].join(", ")
+        const facts = [...this.discoveredFacts].join("\n")
+        if (!files && !dirs) return ""
+        let s = "Already investigated:\n"
+        if (dirs) s += `  Directories: ${dirs}\n`
+        if (files) s += `  Files: ${files}\n`
+        if (facts) s += `\nKnown facts:\n${facts}\n`
+        return s
+      },
+    }
     // Bounded concurrency for parallel tool execution — max 5 concurrent I/O ops
     const toolSem = new Semaphore(5)
 
@@ -193,7 +294,28 @@ export class NightCodeEngine {
         toolIsolation?.setStepId(stepId)
 
         // ── 1. Single LLM call ────────────────────────────────────────────────
+        const preCallTokens = currentMessages.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
+        if (preCallTokens > 8000) {
+          const before = currentMessages.length
+          const cleared = clearOldToolOutputs(currentMessages, 1, currentMode)
+          if (cleared > 0) {
+            console.log(`[engine] Pre-call overflow prevention: cleared ${cleared} old tool outputs (${before} msgs)`)
+          }
+        }
+
         const stepStartTime = performance.now()
+
+        // Inject investigation state for PLAN mode
+        if (currentMode === "plan" && stepNumber > 1) {
+          const summary = investigation.getSummary()
+          if (summary) {
+            currentMessages.push({
+              role: "user",
+              content: `[Investigation Status]\n${summary}\nDo NOT re-read these files. Continue investigating unexplored areas.`,
+            })
+          }
+        }
+
         const step = await planStep(
           currentMessages,
           provider,
@@ -202,10 +324,6 @@ export class NightCodeEngine {
           {
             onText: (text) => {
               this.emitEvent("text_delta", { text })
-            },
-            onReasoning: (text) => {
-              accumulatedReasoning += text
-              this.emitEvent("reasoning_delta", { text })
             },
           },
           signal,
@@ -256,7 +374,6 @@ export class NightCodeEngine {
           finalText = step.content
 
           console.log(`[engine] Done. ${toolCallCount} total tool calls across ${stepNumber} steps. Final text length: ${finalText.length}`)
-          this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
           compactionService?.onStepComplete(stepNumber, provider, model)
           break
         }
@@ -285,14 +402,30 @@ export class NightCodeEngine {
           toolCallCount++
           const resolvedName = toolAliases[tc.toolName] ?? tc.toolName
           const toolDef = availableTools.find((t) => normalize(t.name) === normalize(resolvedName))
-          // State: pending (tool call registered but not yet executing)
           const generatedId = toolIsolation?.registerToolCall(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
           let args = tc.args
+          if (args === null || args === undefined) {
+            const msg = `Malformed tool call: ${tc.toolName} received invalid arguments. The model produced broken JSON.`
+            this.emitEvent("error", { message: msg })
+            toolResultMessages.push({
+              role: "tool",
+              content: [{
+                type: "tool-result",
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+                output: { type: "json" as const, value: { error: msg } },
+              }],
+            })
+            malformedCount++
+            roundFailed++
+            roundTotal++
+            return { tc, toolDef, generatedId, args: null, resolvedName, malformed: true } as const
+          }
           if (resolvedName === "expert_agent") {
             args = { ...args, __emitEvent: this.emitEvent.bind(this), __abortSignal: signal }
           }
           doomLoopTracker.record(tc.toolName, tc.args)
-          return { ...tc, toolDef, generatedId, args, resolvedName }
+          return { ...tc, toolDef, generatedId, args, resolvedName, malformed: false } as const
         })
 
         // Handle unknown tools immediately
@@ -313,9 +446,18 @@ export class NightCodeEngine {
           roundTotal++
         }
 
-        const validCalls = calls.filter((tc) => tc.toolDef)
+        const validCalls = calls.filter((tc) => tc.toolDef && !tc.malformed)
+        const malformedCalls = calls.filter((tc) => tc.malformed)
 
-        // Emit tool_start for all valid calls (store expects tool_start/tool_end)
+        if (malformedCount >= 2) {
+          finalText = "The model keeps producing malformed tool calls. Stopping to prevent a doom loop. Please try a simpler request."
+          break
+        }
+
+        if (malformedCalls.length > 0 && validCalls.length === 0) {
+          break
+        }
+
         for (const tc of validCalls) {
           toolIsolation?.markRunning(tc.generatedId, tc.toolName)
           this.emitEvent("tool_start", { tool: tc.toolName, args: tc.args, callNumber: toolCallCount, toolCallId: tc.generatedId })
@@ -367,7 +509,7 @@ export class NightCodeEngine {
               return { tc, skipResult: true } as const
             }
 
-            if (consecutiveErrors >= 2 && tc.toolDef!.name !== "think") {
+            if (consecutiveErrors >= 2) {
               const forcedThink = {
                 success: true,
                 data: {
@@ -377,9 +519,28 @@ export class NightCodeEngine {
               return { tc, skipResult: false, success: true, data: forcedThink.data, forcedThink: true } as const
             }
 
+            const permRequest = needsPermission(tc.toolName, tc.args)
+            if (permRequest) {
+              this.emitEvent("permission", { tool: tc.toolName, args: tc.args, reason: permRequest.reason, toolCallId: tc.generatedId })
+              return { tc, skipResult: true } as const
+            }
+
             if (!options?.silent && ["write_file", "create_folder"].includes(tc.resolvedName)) {
               await this.takeFileSnapshot(tc.resolvedName, tc.args, tc.generatedId, messageId)
             }
+
+            // Duplicate detection: skip re-reading same file in PLAN mode
+            const fileArg = tc.args.path as string | undefined
+            if (currentMode === "plan" && tc.toolName === "read_file" && fileArg && investigation.hasVisited(fileArg)) {
+              return {
+                tc,
+                success: true,
+                data: { content: `[Already read: ${fileArg}. This file was already investigated. Move on to unexplored areas.]` },
+                skipResult: false,
+                forcedThink: false,
+              } as const
+            }
+
             const execResult = await executeTool(tc.toolDef!, tc.args)
             return { tc, ...execResult, skipResult: false, forcedThink: false } as const
           }))
@@ -485,6 +646,33 @@ export class NightCodeEngine {
               }],
             })
 
+            // Track investigation state for PLAN mode
+            if (currentMode === "plan") {
+              const path = tc.args.path as string | undefined
+              const pattern = tc.args.pattern as string | undefined
+              if (tc.toolName === "read_file" && path) {
+                investigation.addFile(path)
+                if (result.data?.content) {
+                  const content = result.data.content as string
+                  if (content.includes("version") || content.includes("dependencies")) {
+                    investigation.addFact(`${path}: package manifest with dependencies`)
+                  }
+                  if (content.includes("module") || content.includes("import") || content.includes("require")) {
+                    investigation.addFact(`${path}: application code`)
+                  }
+                }
+              }
+              if (tc.toolName === "list_directory" && path) {
+                investigation.addDir(path)
+                const items = (result.data?.items ?? []) as Array<{ name: string; type: string }>
+                for (const item of items.filter((i) => i.type === "file")) {
+                  if (/package\.json|Cargo\.toml|go\.mod|pyproject\.toml|requirements\.txt|Makefile|docker|Dockerfile|\.config\./i.test(item.name)) {
+                    investigation.addFact(`Found config file: ${path}/${item.name}`)
+                  }
+                }
+              }
+            }
+
             roundTotal++
           } else {
             roundFailed++
@@ -510,6 +698,44 @@ export class NightCodeEngine {
           }
         }
 
+        // Mode switch: plan → build on plan_exit success
+        if (currentMode === "plan") {
+          const planExitResult = execResults.find(
+            (r) => r.tc.toolName === "plan_exit" && r.success && r.data?._switchMode === "build"
+          )
+          if (planExitResult) {
+            const planSummary = planExitResult.data.planSummary ?? ""
+            // Verification gate: check if planner gathered meaningful information
+            const hasSubstance = planSummary.length > 50 &&
+              (planSummary.includes("project") || planSummary.includes("package") || planSummary.includes("app") || planSummary.includes("src") || planSummary.includes("lib") || planSummary.includes("config") || planSummary.includes("depend"))
+
+            if (!hasSubstance) {
+              const reminder = `[SYSTEM: Your plan_summary was too brief (${planSummary.length} chars) to switch to BUILD mode. Investigate further — read the project manifest, explore the directory structure, and trace the relevant code. Call plan_exit again with a detailed summary.]`
+              toolResultMessages.push({
+                role: "user",
+                content: [{ type: "text", text: reminder }],
+              })
+              console.log(`[engine] Plan verification FAILED — summary too brief. Staying in PLAN mode.`)
+            } else {
+              currentMode = "build"
+              currentConfig = AGENT_CONFIG
+              const buildTools = currentConfig.tools.map((t) => TOOL_REGISTRY[t.name]).filter(Boolean)
+              const expertTool = TOOL_REGISTRY["expert_agent"]
+              if (expertTool && (!options?.depth || options.depth < 1)) {
+                availableTools = [...buildTools, expertTool]
+              } else {
+                availableTools = buildTools
+              }
+              const switchNote = `[SYSTEM: Mode switched from PLAN to BUILD. Here is the planning summary:\n\n${planSummary}\n\nYou now have full write/edit access. Continue with the implementation based on the investigation above.]`
+              toolResultMessages.push({
+                role: "user",
+                content: [{ type: "text", text: switchNote }],
+              })
+              console.log(`[engine] Mode switched: plan → build`)
+            }
+          }
+        }
+
         // Update consecutive errors based on round failure rate
         if (roundTotal > 0 && (roundFailed / roundTotal) > 0.5) {
           consecutiveErrors++
@@ -531,7 +757,6 @@ export class NightCodeEngine {
             finalText = errors
               ? `Image generation failed: ${errors}`
               : "Image generation failed"
-            this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
           }
           break
         }
@@ -542,12 +767,18 @@ export class NightCodeEngine {
         )
         if (hadImageSuccess) {
           console.log(`[engine] Image generated. Stopping — image is the answer.`)
-          this.emitEvent("thinking", { text: "", reasoning: accumulatedReasoning, toolCallCount })
           break
         }
 
         // ── 5. Trigger compaction if enough steps have passed ──────────────
-        const compactedRange = await compactionService?.onStepComplete(stepNumber, provider, model)
+        let compactedRange = await compactionService?.onStepComplete(stepNumber, provider, model)
+
+        if (!compactedRange) {
+          const postStepTokens = currentMessages.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
+          if (postStepTokens > 12000) {
+            compactedRange = await compactionService?.onOverflow(stepNumber, provider, model)
+          }
+        }
 
         if (compactedRange) {
           const { stepRangeStart, stepRangeEnd } = compactedRange
@@ -594,11 +825,14 @@ export class NightCodeEngine {
           assistantContent.push({ type: "text", text: step.text.replace(/<think>[\s\S]*?<\/think>/g, "").trim() })
         }
         for (const tc of step.toolCalls) {
+          const input = tc.toolName === "write_file"
+            ? { path: tc.args.path, bytes: typeof tc.args.content === "string" ? tc.args.content.length : 0 }
+            : tc.args
           assistantContent.push({
             type: "tool-call",
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
-            input: tc.args,
+            input,
           })
         }
 
@@ -616,13 +850,18 @@ export class NightCodeEngine {
           ...toolResultMessages,
         ]
 
-        console.log(`[engine] Step ${stepNumber} complete: ${step.toolCalls.length} tool calls, context now ${currentMessages.length} messages`)
+        const cleared = clearOldToolOutputs(currentMessages, 2, currentMode)
+        if (cleared > 0) {
+          console.log(`[engine] Cleared ${cleared} old tool outputs to prevent context bloat`)
+        }
+
+        const totalTokens = currentMessages.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
+        console.log(`[engine] Step ${stepNumber} complete: ${step.toolCalls.length} tool calls, context now ${currentMessages.length} messages, ~${totalTokens} tokens`)
         flushBatch()
       }
 
       if (stepNumber >= MAX_STEPS && !finalText) {
         finalText = "I've reached the maximum number of steps for this request. Please try a simpler request or ask me to continue."
-        this.emitEvent("thinking", { text: finalText, reasoning: accumulatedReasoning, toolCallCount })
       }
 
       return finalText

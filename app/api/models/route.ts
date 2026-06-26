@@ -28,6 +28,7 @@ const NAGA_KEY = () => getApiKey("NAGA_API_KEY")
 const SAMBANOVA_KEY = () => getApiKey("SAMBANOVA_API_KEY")
 const FREETHEAI_KEY = () => getApiKey("FREETHEAI_API_KEY")
 const CLOUDFLARE_KEY = () => getApiKey("CLOUDFLARE_API_TOKEN")
+const NVIDIA_KEY = () => getApiKey("NVIDIA_API_KEY")
 
 const GROQ_MODELS: { id: string; display_name: string; provider: string; provider_display_name: string }[] = []
 
@@ -257,6 +258,36 @@ async function fetchFreeTheAIModels() {
   }
 }
 
+async function fetchNvidiaModels() {
+  try {
+    const res = await fetch("https://integrate.api.nvidia.com/v1/models", {
+      headers: { Authorization: `Bearer ${NVIDIA_KEY()}` },
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const exclude = new Set(["gliner-pii", "nemoguard", "riva-translate", "usdcode", "shieldgemma", "reward", "embed", "rerank"])
+    const models = (json.data || [])
+      .filter((m: any) => {
+        if (!m.id) return false
+        const lower = m.id.toLowerCase()
+        if (exclude.has(lower)) return false
+        for (const term of exclude) {
+          if (lower.includes(term)) return false
+        }
+        return true
+      })
+      .map((m: any) => ({
+        id: m.id,
+        display_name: m.id,
+        provider: "nvidia" as const,
+        provider_display_name: "NVIDIA",
+      }))
+    return models.length > 0 ? models : null
+  } catch {
+    return null
+  }
+}
+
 export async function GET() {
   return getCached(async () => {
     const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
@@ -371,6 +402,16 @@ export async function GET() {
       groups.push({
         label: "FreeTheAI",
         models: faModels,
+      })
+    }
+  }
+
+  if (NVIDIA_KEY()) {
+    const nvModels = await fetchNvidiaModels()
+    if (nvModels) {
+      groups.push({
+        label: "NVIDIA",
+        models: nvModels,
       })
     }
   }
