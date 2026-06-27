@@ -1,6 +1,7 @@
 interface SchemaConfig {
   maxDescriptionLength: number
   shortenDescriptions: boolean
+  useShortParamNames?: boolean
 }
 
 const PROVIDER_CONFIGS: Record<string, SchemaConfig> = {

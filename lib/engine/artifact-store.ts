@@ -32,7 +32,7 @@ export function addArtifact(artifact: Artifact): void {
     const oldest = artifacts.keys().next().value
     if (oldest) {
       artifacts.delete(oldest)
-      try { deleteDBArtifact(oldest) } catch {}
+      try { deleteDBArtifact(oldest) } catch (e) { console.error("[artifact] Failed to delete oldest:", e) }
     }
   }
   artifacts.set(artifact.id, artifact)
@@ -46,7 +46,7 @@ export function addArtifact(artifact: Artifact): void {
       created_at: Date.now(),
       updated_at: Date.now(),
     })
-  } catch {}
+  } catch (e) { console.error("[artifact] Failed to create in DB:", e) }
 }
 
 export function getArtifact(id: string): Artifact | undefined {
@@ -69,7 +69,7 @@ export function updateArtifact(id: string, updates: Partial<Pick<Artifact, "titl
       ...updates,
       updated_at: Date.now(),
     })
-  } catch {}
+  } catch (e) { console.error("[artifact] Failed to update in DB:", e) }
   return true
 }
 
@@ -77,7 +77,7 @@ export function deleteArtifact(id: string): boolean {
   loadFromDB()
   const removed = artifacts.delete(id)
   if (removed) {
-    try { deleteDBArtifact(id) } catch {}
+    try { deleteDBArtifact(id) } catch (e) { console.error("[artifact] Failed to delete from DB:", e) }
   }
   return removed
 }
@@ -89,5 +89,5 @@ export function clearArtifacts(): void {
     for (const row of rows) {
       deleteDBArtifact(row.id)
     }
-  } catch {}
+  } catch (e) { console.error("[artifact] Failed to clear DB:", e) }
 }

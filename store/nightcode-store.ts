@@ -645,12 +645,11 @@ export const useNightCodeStore = create<NightCodeState>()(
                   case "text_delta": {
                     const text = (parsed.payload?.text as string) ?? ""
                     if (text) {
-                      if (typeof window !== "undefined") {
-                        window.dispatchEvent(
-                          new CustomEvent("nc:token", {
-                            detail: { messageId: assistantMessage.id, text },
-                          })
-                        )
+                      // Direct DOM write via CustomEvent — avoids Zustand re-render per token.
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("nc:token", {
+                          detail: { messageId: assistantMessage.id, text },
+                        }))
                       }
                       get().updateMessageContent(chatId, assistantMessage.id, text)
                     }

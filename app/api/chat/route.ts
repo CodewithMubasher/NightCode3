@@ -15,6 +15,17 @@ import { ensureConnected } from "@/lib/mcp/manager"
 // and stay warm across requests instead of spawning subprocesses per request.
 let mcpToolsPromise: Promise<ToolImplementation[]> | null = null
 
+const SSE_API_KEY = process.env.SSE_API_KEY
+
+function requireAuth(req: Request): Response | null {
+  if (!SSE_API_KEY) return null
+  const auth = req.headers.get("authorization")
+  if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== SSE_API_KEY) {
+    return new Response("Unauthorized", { status: 401 })
+  }
+  return null
+}
+
 function getMCPTools(): Promise<ToolImplementation[]> {
   if (!mcpToolsPromise) {
     mcpToolsPromise = (async () => {
@@ -31,6 +42,9 @@ function getMCPTools(): Promise<ToolImplementation[]> {
 }
 
 export async function POST(req: Request) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   enableBatching()
   try {
     const body = await req.json()
@@ -85,73 +99,113 @@ export async function POST(req: Request) {
       abortController.abort()
     })
 
+    const MAX_QUEUE = 1024
+    const criticalEvents = new Set(["tool_start", "tool_end", "artifact", "thinking", "error", "message_complete", "usage", "ask"])
+    let lastTextDelta: string | null = null
+    let lastTextPayload: Record<string, unknown> | null = null
+
+    const transform = new TransformStream<{ type: string; payload?: Record<string, unknown>; timestamp?: number }, Uint8Array>({
+      start() {},
+      transform(data, ctrl) {
+        if (abortController.signal.aborted) return
+
+        // Merge consecutive text_delta events
+        if (data.type === "text_delta" && lastTextDelta !== null) {
+          lastTextPayload = { text: String(lastTextPayload?.text ?? "") + String(data.payload?.text ?? "") }
+          return
+        }
+        if (lastTextDelta !== null) {
+          ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text_delta", payload: lastTextPayload, timestamp: Date.now() })}\n\n`))
+          lastTextDelta = null
+          lastTextPayload = null
+        }
+
+        ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ ...data, timestamp: data.timestamp ?? Date.now() })}\n\n`))
+      },
+      flush(ctrl) {
+        if (lastTextDelta !== null) {
+          ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text_delta", payload: lastTextPayload, timestamp: Date.now() })}\n\n`))
+        }
+      },
+    })
+
+    const writable = transform.writable.getWriter()
+
+    const unsubSSE = engine.subscribe((_event, data: any) => {
+      if (abortController.signal.aborted) return
+      // Shed non-critical events when queue exceeds highWaterMark
+      if (data.type !== "text_delta" && !criticalEvents.has(data.type)) {
+        try {
+          writable.write(data)
+        } catch {
+          // drop on full buffer
+        }
+      } else {
+        writable.write(data).catch(() => {})
+      }
+    })
+
+    // Mirror all events to SQLite (dual runtime — no engine changes)
+    const unsubRecorder = engine.subscribe((_event, data: any) => {
+      eventRecorder.record(data.type, data.payload ?? {})
+    })
+
+    let mcpTools: ToolImplementation[] = []
+    try {
+      mcpTools = await getMCPTools()
+    } catch (e) { console.error("[chat] Failed to load MCP tools:", e) }
+    console.log(`Loaded ${mcpTools.length} MCP tools`)
+
+    const engineRun = engine.run(
+      messages as Message[],
+      messageId,
+      provider,
+      effectiveModel,
+      abortController.signal,
+      body.skillInjected,
+      mcpTools,
+      toolIsolation,
+      compactionService,
+      { mode: mode === "caat" ? "caat" : "standard" }
+    )
+
     const stream = new ReadableStream({
       async start(controller) {
-        const criticalEvents = new Set(["tool_start", "tool_end", "artifact", "thinking", "error", "message_complete", "usage", "ask"])
-        const unsubSSE = engine.subscribe((_event, data: any) => {
-          if (abortController.signal.aborted) return
-          console.log('SSE event:', data.type, data.payload ? JSON.stringify(data.payload).substring(0, 100) : '')
-          const desiredSize = controller.desiredSize
-          if (desiredSize !== null && desiredSize < 0) {
-            if (data.type === "text_delta") {
-              try {
-                const line = `data: ${JSON.stringify(data)}\n\n`
-                controller.enqueue(encoder.encode(line))
-              } catch {}
-            }
-            if (criticalEvents.has(data.type)) {
-              try {
-                const line = `data: ${JSON.stringify(data)}\n\n`
-                controller.enqueue(encoder.encode(line))
-              } catch {}
-            }
-            return
-          }
+        const reader = transform.readable.getReader()
+
+        async function pump() {
           try {
-            const line = `data: ${JSON.stringify(data)}\n\n`
-            controller.enqueue(encoder.encode(line))
-          } catch {
-            // stream closed
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              controller.enqueue(value)
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Stream error"
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", payload: { message: msg }, timestamp: Date.now() })}\n\n`))
+            } catch {}
           }
-        })
+        }
 
-        // Mirror all events to SQLite (dual runtime — no engine changes)
-        const unsubRecorder = engine.subscribe((_event, data: any) => {
-          eventRecorder.record(data.type, data.payload ?? {})
-        })
-
-        let mcpTools: ToolImplementation[] = []
-        try {
-          mcpTools = await getMCPTools()
-        } catch {}
-        console.log(`Loaded ${mcpTools.length} MCP tools`)
+        const pumpPromise = pump()
 
         try {
-          await engine.run(
-            messages as Message[],
-            messageId,
-            provider,
-            effectiveModel,
-            abortController.signal,
-            body.skillInjected,
-            mcpTools,
-            toolIsolation,
-            compactionService,
-            { mode: mode === "caat" ? "caat" : "standard" }
-          )
+          await engineRun
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Engine error"
-          const line = `data: ${JSON.stringify({
-            type: "error",
-            payload: { message: msg },
-            timestamp: Date.now(),
-          })}\n\n`
-          try { controller.enqueue(encoder.encode(line)) } catch {}
+          try {
+            writable.write({ type: "error", payload: { message: msg }, timestamp: Date.now() })
+          } catch {}
         } finally {
           unsubSSE()
           unsubRecorder()
           flushBatch()
           disableBatching()
+          try {
+            await writable.close()
+          } catch {}
+          await pumpPromise
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))
           controller.close()
         }

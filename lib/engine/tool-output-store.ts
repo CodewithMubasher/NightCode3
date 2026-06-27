@@ -22,9 +22,9 @@ function cleanupOldFiles(): void {
         if (fs.statSync(fp).mtimeMs < now - CLEANUP_AGE_MS) {
           fs.unlinkSync(fp)
         }
-      } catch {}
+      } catch (e) { console.error("[tool-output] Failed to unlink old file:", e) }
     }
-  } catch {}
+  } catch (e) { console.error("[tool-output] Failed to read output dir:", e) }
 }
 
 let cleanupDone = false

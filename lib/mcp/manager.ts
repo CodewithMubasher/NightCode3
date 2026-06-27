@@ -71,7 +71,7 @@ export async function disconnectMCP(name: string): Promise<void> {
   if (conn) {
     try {
       await conn.client.close()
-    } catch {}
+    } catch (e) { console.error("[mcp] Failed to connect:", e) }
     connections.delete(name)
   }
 }

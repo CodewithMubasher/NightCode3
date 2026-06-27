@@ -18,6 +18,8 @@ import { expertAgentTool } from "./expert-agent"
 import { generateImageTool } from "./generate-image"
 import { taskTool } from "./task"
 import { planExitTool } from "./plan-exit"
+import { getErrorsTool } from "./get-errors"
+import { runTestsTool } from "./run-tests"
 
 export interface ToolImplementation {
   name: string
@@ -63,4 +65,6 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   generate_image: generateImageTool,
   task: taskTool,
   plan_exit: planExitTool,
+  get_errors: getErrorsTool,
+  run_tests: runTestsTool,
 }

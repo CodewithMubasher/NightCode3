@@ -49,7 +49,7 @@ function writeLogs(entries: UsageEntry[]): void {
     const trimmed = entries.slice(-1000)
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
-    } catch {}
+    } catch (e) { console.error("[usage] Failed to reset:", e) }
   }
 }
 

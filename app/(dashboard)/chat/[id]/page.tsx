@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import { QuestionsPanel } from "@/components/chat/questions-panel"
@@ -14,6 +15,7 @@ export default function ChatPage() {
   const router = useRouter()
   const id = params.id as string
   const chat = useNightCodeStore((s) => s.chats.find((c) => c.id === id))
+  const messages = chat?.messages ?? []
   const sendMessage = useNightCodeStore((s) => s.sendMessage)
   const isStreaming = useNightCodeStore((s) => s.isStreaming)
   const askData = useNightCodeStore((s) => s.askData)
@@ -24,11 +26,14 @@ export default function ChatPage() {
   const dismissConfirmation = useNightCodeStore((s) => s.dismissConfirmation)
   const scrollRef = useRef<HTMLDivElement>(null)
   const userScrolled = useRef(false)
+  const autoScrollRef = useRef(true)
+  const lastMessageCount = useRef(messages.length)
 
   useEffect(() => {
     if (!chat) router.replace("/")
   }, [chat, router])
 
+  // Track scroll position to determine if user has scrolled up
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -38,18 +43,29 @@ export default function ChatPage() {
       const threshold = 100
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight
       userScrolled.current = dist > threshold
+      autoScrollRef.current = dist <= threshold
     }
 
     el.addEventListener("scroll", onScroll, { passive: true })
     return () => el.removeEventListener("scroll", onScroll)
   }, [id])
 
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: useCallback(() => scrollRef.current, []),
+    estimateSize: useCallback(() => 120, []),
+    overscan: 10,
+  })
+
+  // Auto-scroll on new messages
   useEffect(() => {
-    if (userScrolled.current || !chat) return
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
-  }, [chat?.messages.length, isStreaming])
+    if (messages.length > lastMessageCount.current) {
+      lastMessageCount.current = messages.length
+      if (autoScrollRef.current) {
+        virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "smooth" })
+      }
+    }
+  }, [messages.length, virtualizer])
 
   if (!chat) return null
 
@@ -80,15 +96,38 @@ export default function ChatPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div ref={scrollRef} className="flex-1 overflow-y-auto hide-scrollbar">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-          {chat.messages.map((message) => (
-            <div
-              key={message.id}
-              className="animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
-            >
-              <MessageBubble message={message} />
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualizer.getVirtualItems()[0]?.start ?? 0}px)`,
+            }}
+          >
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const message = messages[virtualRow.index]
+                return (
+                  <div
+                    key={message.id}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    className="animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
+                  >
+                    <MessageBubble message={message} />
+                  </div>
+                )
+              })}
             </div>
-          ))}
+          </div>
         </div>
       </div>
       <div className="shrink-0 bg-background px-4 pb-4 pt-2">

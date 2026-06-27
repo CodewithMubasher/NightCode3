@@ -22,7 +22,6 @@ import {
   FolderPlus,
   Wrench,
   Plus,
-  Box,
   EllipsisVertical,
   LogOut,
   User,
@@ -55,7 +54,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 const navItems = [
   { icon: CirclePlus, label: "New Chat", href: "/", isNav: true },
-  { icon: Box, label: "Agent Studio", href: "/studio", isNav: true },
   { icon: FolderPlus, label: "Projects", href: "/projects", isNav: true },
   { icon: Wrench, label: "Customize", href: "/customize", isNav: true },
   { icon: Blocks, label: "Artifacts", isNav: false },
@@ -82,7 +80,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarSeparator />
-      <SidebarContent className="mobile-sidebar-content">
+      <div className="shrink-0">
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -142,7 +140,9 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarSeparator />
+      </div>
+      <SidebarSeparator />
+      <SidebarContent className="mobile-sidebar-content">
         <SidebarGroup>
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarGroupContent>

@@ -1,21 +1,20 @@
 import type { ToolImplementation, ToolResult } from "./tools"
 
+const TOOL_TIMEOUT_MS = 30_000
+
 export async function executeTool(
   tool: ToolImplementation,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   const start = performance.now()
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<ToolResult>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("Tool execution timed out after 30 seconds")), 30_000)
-    })
-    let result: ToolResult
-    try {
-      result = await Promise.race([tool.execute(args), timeout])
-    } finally {
-      clearTimeout(timer)
-    }
+    const result = await Promise.race([
+      tool.execute(args),
+      new Promise<ToolResult>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000} seconds`)), TOOL_TIMEOUT_MS)
+      }),
+    ])
     const executionTime = performance.now() - start
     if (result.success) {
       return { ...result, executionTime, data: result.data }
@@ -26,5 +25,7 @@ export async function executeTool(
       success: false,
       error: err instanceof Error ? err.message : "Tool execution failed",
     }
+  } finally {
+    clearTimeout(timer)
   }
 }

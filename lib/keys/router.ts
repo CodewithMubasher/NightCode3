@@ -31,6 +31,7 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   freetheai: { envBase: "FREETHEAI_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   cloudflare:{ envBase: "CLOUDFLARE_API_TOKEN",       maxSuffixed: 0,  authType: "BEARER" },
   nvidia:    { envBase: "NVIDIA_API_KEY",             maxSuffixed: 0,  authType: "BEARER" },
+  local:     { envBase: "LOCAL_AI_DUMMY",             maxSuffixed: 0,  authType: "BEARER" },
 }
 
 let slots: Map<string, KeySlot[]> = new Map()
@@ -88,6 +89,9 @@ function getSlots(provider: string): KeySlot[] {
 }
 
 export function getNextKey(provider: string): KeySlot | null {
+  if (provider === "local") {
+    return { value: "local-no-auth", type: "BEARER", provider: "local", penalizedUntil: 0 }
+  }
   const pool = getSlots(provider)
   if (pool.length === 0) return null
 
@@ -157,6 +161,8 @@ export function getBaseUrl(provider: string, model: string, includeKey: boolean,
       return `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID ?? ""}/ai/v1/chat/completions`
     case "nvidia":
       return `https://integrate.api.nvidia.com/v1/chat/completions`
+    case "local":
+      return "http://127.0.0.1:8000/api/chat"
     case "ollama":
       return `https://ollama.com/api/chat`
     default:
@@ -168,6 +174,8 @@ export function buildAuthHeaders(provider: string, keySlot: KeySlot): Record<str
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   }
+
+  if (provider === "local") return headers
 
   if (provider === "google" || provider === "google_image") {
     if (keySlot.type === "AUTH_TOKEN") {

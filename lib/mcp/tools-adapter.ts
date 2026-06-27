@@ -25,7 +25,7 @@ export async function listAllMCPTools(): Promise<{ name: string; description: st
           inputSchema: tool.inputSchema,
         })
       }
-    } catch {}
+    } catch (e) { console.error("[mcp/tools] Failed to read:", e) }
   }
   return allTools
 }

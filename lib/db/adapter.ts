@@ -32,6 +32,17 @@ export function updateSessionStatus(id: string, status: DBSession["status"]): vo
   q("UPDATE sessions SET status = @status, updated_at = @updated_at WHERE id = @id", { status, updated_at: Date.now(), id })
 }
 
+export function updateSessionMetadata(id: string, metadata: Record<string, unknown>): void {
+  const existing = getSession(id)
+  if (!existing) return
+  const merged = { ...JSON.parse(existing.metadata), ...metadata }
+  q("UPDATE sessions SET metadata = @metadata, updated_at = @updated_at WHERE id = @id", {
+    metadata: JSON.stringify(merged),
+    updated_at: Date.now(),
+    id,
+  })
+}
+
 export function listSessionsByChat(chatId: string): DBSession[] {
   return getDb().prepare("SELECT * FROM sessions WHERE chat_id = ? ORDER BY created_at DESC").all(chatId) as DBSession[]
 }

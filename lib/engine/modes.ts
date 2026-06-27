@@ -52,6 +52,8 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "edit_file" },
     { name: "generate_image" },
     { name: "task" },
+    { name: "get_errors" },
+    { name: "run_tests" },
   ],
   maxIterations: 20,
   allowAutoFix: true,
