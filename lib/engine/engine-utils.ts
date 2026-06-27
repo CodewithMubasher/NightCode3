@@ -17,7 +17,15 @@ export function estimateMessageTokens(msg: { role: string; content: unknown }): 
         const p = part as Record<string, unknown>
         if (p.type === "text" && typeof p.text === "string") return acc + estimateTokens(p.text)
         if (p.type === "tool-call" && p.input) return acc + estimateTokens(JSON.stringify(p.input))
-        if (p.type === "tool-result") return acc + 20
+        if (p.type === "tool-result") {
+          const output = p.output as Record<string, unknown> | undefined
+          if (output?.value) {
+            const val = output.value
+            if (typeof val === "string") return acc + estimateTokens(val)
+            if (typeof val === "object") return acc + estimateTokens(JSON.stringify(val))
+          }
+          return acc + 20
+        }
       }
       return acc
     }, 0)
@@ -47,15 +55,10 @@ export function clearOldToolOutputs(messages: Array<{ role: string; content: unk
       const output = part.output as Record<string, unknown> | undefined
       if (!output || typeof output !== "object") continue
       const val = output.value
-      if (typeof val === "string" && val.length > CLEAR_THRESHOLD_TOKENS) {
+      const tokenCount = typeof val === "string" ? estimateTokens(val) : typeof val === "object" && val !== null ? estimateTokens(JSON.stringify(val)) : 0
+      if (tokenCount > CLEAR_THRESHOLD_TOKENS) {
         part.output = { type: "json" as const, value: `[Tool result processed: ${toolName}]` }
         cleared++
-      } else if (typeof val === "object" && val !== null) {
-        const str = JSON.stringify(val)
-        if (str.length > CLEAR_THRESHOLD_TOKENS) {
-          part.output = { type: "json" as const, value: `[Tool result processed: ${toolName}]` }
-          cleared++
-        }
       }
     }
   }
@@ -101,4 +104,42 @@ export const toolAliases: Record<string, string> = {
   remove_file: "delete_file",
   list_files: "list_directory",
   search_code: "search_files",
+}
+
+const TOOL_SETS: Record<string, string[]> = {
+  create: ["write_file", "create_folder", "read_file", "list_directory", "edit_file", "grep"],
+  read:   ["read_file", "list_directory", "grep", "search_files", "search_memories"],
+  command: ["execute_command", "read_file", "write_file", "get_errors", "run_tests"],
+}
+
+const REQUEST_PATTERNS: Array<{ regex: RegExp; set: string }> = [
+  // File creation: "create file", "write to", "make a file", "new file"
+  { regex: /create\s+.*file|write\s+.*file|make\s+.*file|new\s+file/i, set: "create" },
+  // File edit: "edit", "update", "change", "modify", "add to file"
+  { regex: /edit|update|change|modify|add.*file|insert/i, set: "create" },
+  // Read tasks: "read", "show", "display", "cat", "what is", "tell me about"
+  { regex: /^(?:read|show|display|cat|what|list|find|search) /i, set: "read" },
+  // Command tasks: "run", "execute", "install", "build", "test", "npm"
+  { regex: /^(?:run|execute|install|build|test|deploy) |npm |npx |yarn /i, set: "command" },
+  // Analyze: same as read
+  { regex: /analyze|review|investigate|explore|audit/i, set: "read" },
+]
+
+export function getToolsForRequest(userMessage: string, allTools: string[]): string[] {
+  const trimmed = userMessage.trim()
+  if (trimmed.length > 300) return allTools // long messages = complex = all tools
+
+  for (const { regex, set } of REQUEST_PATTERNS) {
+    if (regex.test(trimmed)) {
+      const subset = TOOL_SETS[set]
+      // Always include essential navigation tools
+      const essentials = ["read_file", "list_directory", "grep", "search_files"]
+      const combined = [...new Set([...subset, ...essentials])]
+      // Filter to only include tools that exist in the full registry
+      const available = combined.filter((t) => allTools.includes(t))
+      if (available.length > 0) return available
+    }
+  }
+
+  return allTools
 }

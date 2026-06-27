@@ -122,11 +122,14 @@ export async function streamOpenAI(
     body.tools = buildToolsArray(tools)
   }
 
+  const timeoutSignal = AbortSignal.timeout(120_000)
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal
+
   const res = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
-    signal,
+    signal: combinedSignal,
   })
 
   if (!res.ok) {

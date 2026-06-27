@@ -162,7 +162,7 @@ export function getBaseUrl(provider: string, model: string, includeKey: boolean,
     case "nvidia":
       return `https://integrate.api.nvidia.com/v1/chat/completions`
     case "local":
-      return "http://127.0.0.1:8000/api/chat"
+      return process.env.LOCAL_AI_URL || "http://127.0.0.1:8000/api/chat"
     case "ollama":
       return `https://ollama.com/api/chat`
     default:

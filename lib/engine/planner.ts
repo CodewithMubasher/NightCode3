@@ -60,6 +60,8 @@ export async function planStep(
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error(String(err))
         const status = (err as any)?.status ?? 0
+        const errName = lastErr.name === "TimeoutError" ? "TimeoutError" : lastErr.name
+        console.error(`[planner] Attempt ${attempt + 1}/${maxRetries + 1} failed: ${errName} — ${lastErr.message.slice(0, 200)}${status ? ` (HTTP ${status})` : ""}`)
         if (status && status !== 429 && status < 500) throw lastErr
         if (attempt >= maxRetries) throw lastErr
       }
@@ -107,8 +109,8 @@ export async function planStep(
     const statusMatch = msg.match(/\b(4\d\d|5\d\d)\b/)
     const httpStatus = statusMatch ? parseInt(statusMatch[1]) : 0
 
-    if (httpStatus === 429 || httpStatus === 413) {
-      console.error(`[planner] API quota/limit error (HTTP ${httpStatus}): ${msg}. Aborting tool loop.`)
+    if (httpStatus === 413) {
+      console.error(`[planner] Payload too large (HTTP 413): ${msg}. Aborting tool loop.`)
       throw err
     }
 

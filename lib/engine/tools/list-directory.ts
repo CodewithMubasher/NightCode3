@@ -1,22 +1,18 @@
 import * as fs from "fs"
 import * as path from "path"
-
-const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+import { resolvePath as resolveWorkspacePath } from "../path-utils"
 
 function resolvePath(dirPath: string): string {
-  let resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
-  resolved = path.normalize(resolved)
-  return resolved
+  return resolveWorkspacePath(dirPath)
 }
 
 // In-memory directory listing cache with TTL
-const listingCache = new Map<string, { items: Array<{ name: string; type: string; size: number | null }>; timestamp: number }>()
+const listingCache = new Map<string, { items: Array<{ name: string; type: string; size: string | number | null }>; timestamp: number }>()
 const CACHE_TTL_MS = 60_000
 
 export function invalidateListingCache(dirPath?: string): void {
   if (dirPath) {
-    const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
-    listingCache.delete(path.normalize(resolved))
+    listingCache.delete(resolvePath(dirPath))
   } else {
     listingCache.clear()
   }

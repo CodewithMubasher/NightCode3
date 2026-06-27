@@ -6,6 +6,15 @@
     "args": [],
     "url": "",
     "environment": {},
-    "enabled": false
+    "enabled": true
+  },
+  {
+    "name": "gmail_mcp",
+    "type": "local",
+    "command": "python F:\\win-mcp\\gmail_mcp.py",
+    "args": [],
+    "url": "",
+    "environment": {},
+    "enabled": true
   }
 ]

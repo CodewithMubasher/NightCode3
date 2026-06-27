@@ -9,3 +9,5 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/openai@3.0.71'
   - '@ai-sdk/provider-utils@4.0.29'
   - better-sqlite3@12.11.1
+  - '@tanstack/react-virtual@3.14.4'
+  - '@tanstack/virtual-core@3.17.2'

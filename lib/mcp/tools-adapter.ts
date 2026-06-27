@@ -70,7 +70,7 @@ export async function createMCPToolImplementations(): Promise<ToolImplementation
                 .filter((c: any) => c.type === "text")
                 .map((c: any) => c.text)
                 .join("\n")
-              return { success: true, data: { text, raw: res } }
+              return { success: true, data: { text } }
             } catch (err) {
               return { success: false, error: (err as Error).message }
             }

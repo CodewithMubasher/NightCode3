@@ -7,6 +7,7 @@ import {
   CheckCircle2, ChevronDown, ChevronRight, Circle,
   FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot, Brain,
   Download, ImageOff, Image as ImageIcon,
+  Camera, Mail, Table, FileType, Globe, Search, Edit,
 } from "lucide-react"
 import {
   Attachments,
@@ -144,8 +145,16 @@ function GeneratedImageCard({ image }: { image: GeneratedImage }) {
 }
 
 function toolIcon(toolName: string) {
-  const mcpMatch = toolName.match(/^(.+?)_(.+)/)
+  const mcpMatch = toolName.match(/^(.+?)_(.+)_(.+)/)
   if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent","generate_image"].includes(toolName)) {
+    const action = mcpMatch[3]
+    if (action.includes("screenshot") || action.includes("screen_shot")) return Camera
+    if (action.includes("send") || action.includes("email") || action.includes("mail")) return Mail
+    if (action.includes("excel") || action.includes("sheet") || action.includes("spreadsheet") || action.includes("table")) return Table
+    if (action.includes("word") || action.includes("document") || action.includes("docx")) return FileType
+    if (action.includes("search") || action.includes("find") || action.includes("query")) return Search
+    if (action.includes("navigate") || action.includes("browse") || action.includes("open_url")) return Globe
+    if (action.includes("edit") || action.includes("write") || action.includes("create") || action.includes("update")) return Edit
     return Cable
   }
   switch (toolName) {
@@ -267,7 +276,47 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     expert_agent: () => "Expert Agent",
     generate_image: () => isRunning ? "Generating image" : "Generated image",
   }
-  const label = toolLabels[toolState.tool]?.(args) ?? (toolState.tool.startsWith("mcp_") ? "Use MCP" : toolState.tool)
+
+  function humanizeToolName(name: string): string {
+    const known: Record<string, string> = {
+      win_control_mcp_take_screenshot: "Took Screenshot",
+      win_control_mcp_open_app: "Opened App",
+      win_control_mcp_hotkey: "Pressed Hotkey",
+      win_control_mcp_press_key: "Pressed Key",
+      win_control_mcp_write_text: "Wrote Text",
+      win_control_mcp_open_url: "Opened URL",
+      win_control_mcp_get_mouse_position: "Got Mouse Position",
+      gmail_mcp_gmail_send: "Email Sent",
+      gmail_mcp_gmail_inbox: "Read Inbox",
+      gmail_mcp_gmail_unread: "Read Unread",
+      gmail_mcp_gmail_search: "Searched Emails",
+      gmail_mcp_gmail_read_body: "Read Email",
+      gmail_mcp_gmail_mark_read: "Marked Read",
+      gmail_mcp_gmail_reply: "Replied",
+      gmail_mcp_gmail_trash: "Trashed",
+      gmail_mcp_gmail_download_attachments: "Downloaded Attachments",
+      excel_mcp_excel_create_workbook: "Created Workbook",
+      excel_mcp_excel_write_cell: "Wrote Cell",
+      excel_mcp_excel_write_range: "Wrote Range",
+      excel_mcp_excel_read_cell: "Read Cell",
+      excel_mcp_excel_read_range: "Read Range",
+      excel_mcp_excel_create_chart: "Created Chart",
+      excel_mcp_excel_add_sheet: "Added Sheet",
+      ms_office_mcp_word_create_blank: "Created Document",
+      ms_office_mcp_word_add_paragraph: "Added Paragraph",
+      ms_office_mcp_word_add_table: "Added Table",
+      ms_office_mcp_word_add_heading: "Added Heading",
+      playwright_browser_navigate: "Navigated",
+      playwright_browser_click: "Clicked",
+      playwright_browser_type: "Typed",
+      playwright_browser_snapshot: "Took Snapshot",
+      playwright_browser_take_screenshot: "Took Screenshot",
+      playwright_browser_fill_form: "Filled Form",
+    }
+    return known[name] ?? name
+  }
+
+  const label = toolLabels[toolState.tool]?.(args) ?? humanizeToolName(toolState.tool)
 
   return (
     <div className="relative flex flex-col gap-1">
@@ -510,14 +559,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isStreamingTool = message.status === "streaming" && toolCount > 0
   const isStreamingReasoning = message.status === "streaming" && hasReasoning
   const hasRunningTools = Object.values(message.toolStates).some((t) => t.status === "running")
-  const [expanded, setExpanded] = useState(isStreamingTool || hasReasoning)
+  const [expanded, setExpanded] = useState(false)
 
-  // Auto-expand when tools start running during streaming
-  useEffect(() => {
-    if (isStreamingTool || isStreamingReasoning) {
-      setExpanded(true)
-    }
-  }, [isStreamingTool, isStreamingReasoning])
   const timelineRef = useRef<HTMLDivElement>(null)
   const [contentHeight, setContentHeight] = useState(0)
 

@@ -1,15 +1,9 @@
 import * as fs from "fs"
 import * as path from "path"
-
-const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+import { resolvePath as resolveWorkspacePath } from "../path-utils"
 
 function resolvePath(dirPath: string): string {
-  let resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
-  resolved = path.normalize(resolved)
-  if (process.platform === "win32") {
-    resolved = resolved.replace(/\//g, "\\")
-  }
-  return resolved
+  return resolveWorkspacePath(dirPath)
 }
 
 function globSync(pattern: string, root: string): string[] {

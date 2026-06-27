@@ -28,6 +28,9 @@ import {
   normalizeToolName,
   toolAliases,
 } from "./engine-utils"
+import { MissionTracker, detectExplorationIntent } from "./mission"
+import { WorkingMemory } from "./working-memory"
+import { resolvePath as resolveWorkspacePath } from "./path-utils"
 import type { EngineRunOptions } from "./index"
 
 export async function executeEngineRun(
@@ -58,38 +61,47 @@ export async function executeEngineRun(
   let cumulativeOutputTokens = 0
   let cumulativeReasoningTokens = 0
   let totalDurationMs = 0
+  let emptyTextRetries = 0
 
   const stepMessages = new Map<number, Array<{ role: string; content: unknown }>>()
 
-  const investigation = {
-    visitedFiles: new Set<string>(),
-    visitedDirs: new Set<string>(),
-    discoveredFacts: new Set<string>(),
-    toolCallHistory: new Array<{ tool: string; args: string }>(),
-    addFile(file: string) { this.visitedFiles.add(file) },
-    addDir(dir: string) { this.visitedDirs.add(dir) },
-    addFact(fact: string) { this.discoveredFacts.add(fact) },
-    hasVisited(file: string) { return this.visitedFiles.has(file) },
-    alreadyCalled(tool: string, args: Record<string, unknown>): boolean {
-      const key = `${tool}::${JSON.stringify(args)}`
-      if (this.toolCallHistory.some((t) => `${t.tool}::${t.args}` === key)) return true
-      this.toolCallHistory.push({ tool, args: JSON.stringify(args) })
-      return false
-    },
-    getSummary(): string {
-      const files = [...this.visitedFiles].join(", ")
-      const dirs = [...this.visitedDirs].join(", ")
-      const facts = [...this.discoveredFacts].join("\n")
-      if (!files && !dirs) return ""
-      let s = "Already investigated:\n"
-      if (dirs) s += `  Directories: ${dirs}\n`
-      if (files) s += `  Files: ${files}\n`
-      if (facts) s += `\nKnown facts:\n${facts}\n`
-      return s
-    },
-  }
+  let currentSystemPrompt = requestSystemPrompt
 
   const toolSem = new Semaphore(5)
+
+  const workingMemory = new WorkingMemory()
+
+  const userMsgText = typeof messages[messages.length - 1]?.content === "string"
+    ? messages[messages.length - 1].content as string
+    : ""
+  const hasExplorationIntent = detectExplorationIntent(userMsgText)
+  const missionTracker = hasExplorationIntent ? new MissionTracker() : null
+
+  // ── Deterministic pre-fetch: before the LLM ever runs, resolve
+  // file paths mentioned in the user message and inject their content
+  // directly into working memory. This avoids the "list dir then read"
+  // dance for files the user explicitly named.
+  const mentionedPaths: string[] = []
+  const pathPattern = /[a-zA-Z]:(?:[\\/][^\\\s"<>|?*]+)+\.?[a-zA-Z0-9]*/g
+  let m: RegExpExecArray | null
+  while ((m = pathPattern.exec(userMsgText)) !== null) {
+    mentionedPaths.push(m[0].replace(/\/$/, "").replace(/\\$/, ""))
+  }
+  if (mentionedPaths.length > 0) {
+    for (const rawPath of mentionedPaths) {
+      try {
+        const resolved = resolveWorkspacePath(rawPath)
+        if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+          const content = fs.readFileSync(resolved, "utf-8")
+          const lines = content.split("\n")
+          workingMemory.setFile(rawPath, content, lines.length)
+          console.log(`[engine] Pre-fetched: ${rawPath} (${lines.length} lines)`)
+        }
+      } catch {
+        // Path outside workspace or doesn't exist — skip silently
+      }
+    }
+  }
 
   try {
     while (stepNumber < MAX_STEPS) {
@@ -100,6 +112,18 @@ export async function executeEngineRun(
       console.log(`[engine] Step ${stepNumber}/${MAX_STEPS} starting`)
 
       toolIsolation?.setStepId(stepId)
+
+      // ── Context window: keep only last 10 messages ────────────────────
+      const MAX_CONTEXT_MESSAGES = 10
+      if (currentMessages.length > MAX_CONTEXT_MESSAGES) {
+        const before = currentMessages.length
+        const firstUserIdx = currentMessages.findIndex((m) => m.role === "user")
+        const kept: Array<{ role: string; content: unknown }> = firstUserIdx >= 0
+          ? [currentMessages[firstUserIdx]]
+          : []
+        currentMessages = [...kept, ...currentMessages.slice(-(MAX_CONTEXT_MESSAGES - kept.length))]
+        console.log(`[engine] Context window: trimmed ${before} → ${currentMessages.length} messages`)
+      }
 
       const preCallTokens = currentMessages.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
       if (preCallTokens > 8000) {
@@ -112,15 +136,24 @@ export async function executeEngineRun(
 
       const stepStartTime = startStepTimer()
 
-      if (currentMode === "plan" && stepNumber > 1) {
-        const summary = investigation.getSummary()
-        if (summary) {
-          currentMessages.push({
-            role: "user",
-            content: `[Investigation Status]\n${summary}\nDo NOT re-read these files. Continue investigating unexplored areas.`,
-          })
-        }
+      const summary = workingMemory.summarize()
+      if (summary) {
+        currentMessages.push({
+          role: "user",
+          content: `[WORKING MEMORY — files already read, use this instead of calling read_file again]\n\n${summary}`,
+        })
+        currentMessages.push({
+          role: "assistant",
+          content: "I have the cached file contents. I'll use them directly.",
+        })
       }
+
+      // ── Log actual payload size before LLM call ──
+      const sysPromptSize = currentSystemPrompt?.length ?? 0
+      const msgsSize = JSON.stringify(currentMessages).length
+      const toolsSize = JSON.stringify(availableTools.map((t) => ({ name: t.name, schema: t.schema }))).length
+      const estTokens = preCallTokens
+      console.log(`[engine] Payload: system=${sysPromptSize} bytes, messages=${msgsSize} bytes (${currentMessages.length} msgs), tools=${toolsSize} bytes, estTokens=${estTokens}`)
 
       let step: Awaited<ReturnType<typeof planStep>> | null = null
       try {
@@ -135,7 +168,7 @@ export async function executeEngineRun(
             },
           },
           signal,
-          requestSystemPrompt
+          currentSystemPrompt
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error"
@@ -188,7 +221,35 @@ export async function executeEngineRun(
       }
 
       if (step.type === "text") {
+        if (!step.content && emptyTextRetries < 2) {
+          emptyTextRetries++
+          const userMsg = messages[messages.length - 1]
+          const userText = typeof userMsg?.content === "string" ? userMsg.content : "your request"
+          console.log(`[engine] Step ${stepNumber} returned empty text — re-prompting (${emptyTextRetries}/2)`)
+          currentMessages.push({
+            role: "user",
+            content: `[SYSTEM: Empty response (attempt ${emptyTextRetries}/2). Original request: "${userText.slice(0, 200)}". If you were creating or editing files, call the tool now. If you need more context, read the relevant files. Do not narrate — execute.]`,
+          })
+          continue
+        }
+
         finalText = step.content
+
+        // ── Mission completion check: don't stop just because the model produced text.
+        // If the user asked for analysis and the model hasn't investigated deeply,
+        // re-prompt with remaining exploration objectives.
+        if (missionTracker && missionTracker.shouldRePrompt()) {
+          const reprompt = missionTracker.consumeRePrompt()
+          if (reprompt) {
+            console.log(`[engine] Exploration re-prompt ${missionTracker["rePrompts"]}/2 — ${missionTracker.depth} facts so far`)
+            currentMessages.push({
+              role: "user",
+              content: reprompt,
+            })
+            continue
+          }
+        }
+
         console.log(`[engine] Done. ${toolCallCount} total tool calls across ${stepNumber} steps. Final text length: ${finalText.length}`)
         compactionService?.onStepComplete(stepNumber, provider, model)
         break
@@ -224,10 +285,8 @@ export async function executeEngineRun(
           roundTotal++
           return { ...tc, toolDef: undefined, generatedId, args: null as null, resolvedName, malformed: true } as const
         }
-        if (resolvedName === "expert_agent") {
-          args = { ...args, __emitEvent: emitEvent, __abortSignal: signal }
-        }
         doomLoopTracker.record(tc.toolName, tc.args)
+        missionTracker?.recordToolCall(tc.toolName, tc.args)
         return { ...tc, toolDef, generatedId, args, resolvedName, malformed: false } as const
       })
 
@@ -342,17 +401,29 @@ export async function executeEngineRun(
           }
 
           const fileArg = tc.args.path as string | undefined
-          if (currentMode === "plan" && tc.toolName === "read_file" && fileArg && investigation.hasVisited(fileArg)) {
-            return {
-              tc,
-              success: true,
-              data: { content: `[Already read: ${fileArg}. This file was already investigated. Move on to unexplored areas.]` },
-              skipResult: false,
-              forcedThink: false,
-            } as const
+
+          if (tc.toolName === "read_file" && fileArg) {
+            const cached = workingMemory.getFile(fileArg)
+            if (cached && !tc.args.offset) {
+              workingMemory.setFile(fileArg, cached.content, cached.totalLines)
+              return {
+                tc,
+                success: true,
+                data: { content: cached.content, path: fileArg, size: cached.content.length, totalLines: cached.totalLines, cached: true },
+                skipResult: false,
+                forcedThink: false,
+              } as const
+            }
           }
 
           const execResult = await executeTool(tc.toolDef!, tc.args)
+
+          if (tc.toolName === "read_file" && execResult.success && fileArg) {
+            const data = execResult.data as { content?: string; totalLines?: number } | undefined
+            if (data?.content && !tc.args.offset) {
+              workingMemory.setFile(fileArg, data.content, data.totalLines ?? data.content.split("\n").length)
+            }
+          }
           return { tc, ...execResult, skipResult: false, forcedThink: false } as const
         }))
       )
@@ -368,6 +439,7 @@ export async function executeEngineRun(
         if (result.forcedThink) {
           roundFailed++
           roundTotal++
+          console.log(`[engine] Tool forced think: ${tc.toolName} — ${consecutiveErrors} consecutive failures`)
           toolResultMessages.push({
             role: "tool",
             content: [{
@@ -383,22 +455,24 @@ export async function executeEngineRun(
         if (!result.success) {
           roundFailed++
           roundTotal++
+          const errorMsg = result.error ?? "Tool execution failed"
+          console.log(`[engine] Tool failed: ${tc.toolName} — ${errorMsg.slice(0, 200)}`)
           emitEvent("tool_end", {
             tool: tc.toolName,
             args: tc.args,
             status: "error",
-            error: result.error,
+            error: errorMsg,
             callNumber: toolCallCount,
             toolCallId: tc.generatedId,
           })
-          toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, result.error ?? "Tool execution failed", null, undefined)
+          toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, errorMsg, null, undefined)
           toolResultMessages.push({
             role: "tool",
             content: [{
               type: "tool-result",
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              output: { type: "json" as const, value: { error: result.error } },
+              output: { type: "json" as const, value: { error: errorMsg } },
             }],
           })
           continue
@@ -415,9 +489,11 @@ export async function executeEngineRun(
           // Invalidate directory listing cache after file mutations
           const fileArg = tc.args.path as string | undefined
           if (fileArg && ["write_file", "create_folder", "delete_file", "edit_file"].includes(tc.toolName)) {
-            const dir = path.dirname(path.isAbsolute(fileArg) ? fileArg : path.resolve(WORKSPACE, fileArg))
+            const absPath = path.isAbsolute(fileArg) ? fileArg : path.resolve(WORKSPACE, fileArg)
+            const dir = path.dirname(absPath)
             invalidateListingCache(dir)
-            invalidateListingCache(WORKSPACE) // root listing may change too
+            invalidateListingCache(WORKSPACE)
+            workingMemory.invalidateFile(absPath)
           }
 
           if (tc.toolName === "create_artifact") {
@@ -468,23 +544,21 @@ export async function executeEngineRun(
             const path = tc.args.path as string | undefined
             const pattern = tc.args.pattern as string | undefined
             if (tc.toolName === "read_file" && path) {
-              investigation.addFile(path)
               if (result.data?.content) {
                 const content = result.data.content as string
                 if (content.includes("version") || content.includes("dependencies")) {
-                  investigation.addFact(`${path}: package manifest with dependencies`)
+                  workingMemory.addFact(`manifest:${path}`, `${path} — package manifest with dependencies`, "plan_analysis")
                 }
                 if (content.includes("module") || content.includes("import") || content.includes("require")) {
-                  investigation.addFact(`${path}: application code`)
+                  workingMemory.addFact(`code:${path}`, `${path} — application code`, "plan_analysis")
                 }
               }
             }
             if (tc.toolName === "list_directory" && path) {
-              investigation.addDir(path)
               const items = (result.data?.items ?? []) as Array<{ name: string; type: string }>
               for (const item of items.filter((i) => i.type === "file")) {
                 if (/package\.json|Cargo\.toml|go\.mod|pyproject\.toml|requirements\.txt|Makefile|docker|Dockerfile|\.config\./i.test(item.name)) {
-                  investigation.addFact(`Found config file: ${path}/${item.name}`)
+                  workingMemory.addFact(`config:${path}/${item.name}`, `Found config file: ${path}/${item.name}`, "plan_analysis")
                 }
               }
             }
@@ -534,13 +608,12 @@ export async function executeEngineRun(
           } else {
             currentMode = "build"
             currentConfig = AGENT_CONFIG
-            const buildTools = currentConfig.tools.map((t) => TOOL_REGISTRY[t.name]).filter(Boolean)
-            const expertTool = TOOL_REGISTRY["expert_agent"]
-            if (expertTool && (!options?.depth || options.depth < 1)) {
-              availableTools = [...buildTools, expertTool]
-            } else {
-              availableTools = buildTools
-            }
+            // Rebuild system prompt for BUILD mode (was PLAN prompt)
+            const { buildSystemPrompt } = await import("./context-builder")
+            currentSystemPrompt = buildSystemPrompt("standard", undefined, model)
+            availableTools = currentConfig.tools
+              .map((t) => TOOL_REGISTRY[t.name])
+              .filter(Boolean) as ToolImplementation[]
             const switchNote = `[SYSTEM: Mode switched from PLAN to BUILD. Here is the planning summary:\n\n${planSummary}\n\nYou now have full write/edit access. Continue with the implementation based on the investigation above.]`
             toolResultMessages.push({
               role: "user",
@@ -553,7 +626,11 @@ export async function executeEngineRun(
 
       if (roundTotal > 0 && (roundFailed / roundTotal) > 0.5) {
         consecutiveErrors++
-        console.log(`[engine] Round failure rate ${roundFailed}/${roundTotal} > 50%, consecutiveErrors=${consecutiveErrors}`)
+        const failedTools = execResults
+          .filter((r) => !r.skipResult && !r.success)
+          .map((r) => r.tc.toolName)
+        const toolSummary = [...new Set(failedTools)].join(", ")
+        console.log(`[engine] Round failure rate ${roundFailed}/${roundTotal} > 50%, consecutiveErrors=${consecutiveErrors}. Failing tools: ${toolSummary || "(unknown)"}`)
       } else {
         consecutiveErrors = 0
       }
@@ -617,6 +694,25 @@ export async function executeEngineRun(
       if (step.text) {
         assistantContent.push({ type: "text", text: step.text.replace(/<think>[\s\S]*?<\/think>/g, "").trim() })
       }
+
+      // ── Escape hatch: LLM can request more tools mid-conversation ──
+      if (step.text && !step.text.includes("<think>") && step.toolCalls.length === 0) {
+        const capMatch = step.text.match(/\{"request_capability":\s*"(\w+)"\}/)
+        if (capMatch) {
+          availableTools = currentConfig.tools
+            .map((t) => TOOL_REGISTRY[t.name])
+            .filter(Boolean) as ToolImplementation[]
+          console.log(`[engine] Escape hatch: requested "${capMatch[1]}", reloaded all ${availableTools.length} tools`)
+          // Add assistant text + system note into messages for full context
+          const assistantMsg: { role: string; content: unknown } = { role: "assistant", content: assistantContent }
+          currentMessages = [...currentMessages, assistantMsg, {
+            role: "user",
+            content: [{ type: "text", text: `[SYSTEM: All tools are now available including ${capMatch[1]} capabilities. Continue your task.]` }],
+          }]
+          stepMessages.set(stepNumber, [assistantMsg])
+          continue
+        }
+      }
       for (const tc of step.toolCalls) {
         const input = tc.toolName === "write_file"
           ? { path: tc.args.path, bytes: typeof tc.args.content === "string" ? tc.args.content.length : 0 }
@@ -658,7 +754,10 @@ export async function executeEngineRun(
       }
 
       if (consecutiveErrors >= 3) {
-        console.log(`[engine] Aborting: ${consecutiveErrors} consecutive failed rounds.`)
+        const failedSummary = execResults
+          .filter((r): r is typeof r & { success: false; error?: string } => !r.skipResult && "success" in r && r.success === false)
+          .map((r) => `${r.tc.toolName}: ${(r.error ?? "unknown").slice(0, 80)}`)
+        console.log(`[engine] Aborting: ${consecutiveErrors} consecutive failed rounds. Failures: ${failedSummary.join(" | ")}`)
         if (!finalText) {
           finalText = "I hit repeated errors while working on this task. Here's what I was able to determine; please rephrase or provide more detail and I'll try a different approach."
         }
@@ -675,6 +774,14 @@ export async function executeEngineRun(
         })
       } catch (e: any) { console.error("[engine] Failed to update session metadata:", e.message) }
 
+      const usedToolMap = new Map<string, number>()
+      for (const r of execResults) {
+        if (!r.skipResult) usedToolMap.set(r.tc.toolName, (usedToolMap.get(r.tc.toolName) ?? 0) + 1)
+      }
+      const logMsg = [...usedToolMap.entries()].map(([name, count]) => `${name}(${count})`).join(", ")
+      const loadedCount = availableTools.length
+      const unused = availableTools.filter((t) => !usedToolMap.has(t.name) && t.name !== "ask" && t.name !== "task").map((t) => t.name)
+      console.log(`[engine] Step ${stepNumber}: loaded=${loadedCount} used=${logMsg || "text-only"} unused=${unused.length > 0 ? unused.join(",") : "none"}`)
       const totalTokens = currentMessages.reduce((acc, m) => acc + estimateMessageTokens(m), 0)
       console.log(`[engine] Step ${stepNumber} complete: ${step.toolCalls.length} tool calls, context now ${currentMessages.length} messages, ~${totalTokens} tokens`)
       flushBatch()

@@ -254,11 +254,12 @@ export async function streamGoogle(
     body.generationConfig = { temperature: temp }
   }
 
+  const timeoutSignal = AbortSignal.timeout(120_000)
   const res = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
-    signal,
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   })
 
   if (!res.ok) {

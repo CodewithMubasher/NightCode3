@@ -9,6 +9,7 @@ export async function streamOllama(
   url: string,
   signal?: AbortSignal,
 ): Promise<StreamResult> {
+  const timeoutSignal = AbortSignal.timeout(120_000)
   const res = await fetch(url, {
     method: "POST",
     headers,
@@ -17,7 +18,7 @@ export async function streamOllama(
       messages: formatOpenAIMessages(messages),
       stream: true,
     }),
-    signal,
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   })
 
   if (!res.ok) {

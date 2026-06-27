@@ -1,15 +1,9 @@
 import * as fs from "fs"
 import * as path from "path"
-
-const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+import { resolvePath as resolveWorkspacePath } from "../path-utils"
 
 function resolvePath(filePath: string): string {
-  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE, filePath)
-  const normalized = path.normalize(resolved)
-  if (!normalized.startsWith(WORKSPACE)) {
-    throw new Error(`Path traversal denied: "${filePath}" is outside the workspace`)
-  }
-  return normalized
+  return resolveWorkspacePath(filePath)
 }
 
 export const writeFileTool = {

@@ -2,6 +2,7 @@ import type { Message } from "@/types"
 import type { ToolImplementation } from "./tools"
 import { getCompactionsBySession } from "@/lib/db/adapter"
 import { listArtifacts } from "@/lib/engine/artifact-store"
+import * as path from "path"
 
 const AGENT_PROMPT = `You are NightCode, an intelligent AI coding assistant with access to tools.
 
@@ -22,7 +23,7 @@ PARALLEL TOOL RULE: You can call multiple independent tools in a single step. Fo
 ARTIFACT TOOLS: Use list_artifacts to see stored artifacts, read_artifact to view full content, and edit_artifact to update them. These are your second brain — reuse and refine artifacts across conversations.
 SEARCH MEMORIES: Use search_memories to find relevant facts, decisions, and project context from past conversations stored in artifacts. Search before creating new artifacts to avoid duplicates.
 
-FILE PATHS: You can use both relative and absolute paths. Relative paths resolve from the workspace. Absolute paths like "C:\Users\..." work directly. When the user gives you a path, use it exactly as provided.
+WORKING MEMORY: The engine tracks which files you've already read. If you try to read a file you've already seen, the cache serves it instantly. You do NOT need to re-read files. Trust the cache — focus on exploring new files instead.
 
 SILENT BUILDING: When building or writing code, call tools immediately. Do NOT output any text describing what you will do or explaining your plan. No "I'll create...", no "Let me build...", no "First I'll...". Silence the narration. Call the tools. If you need to explain what was done, do it as a single summary AFTER all tool calls complete.
 
@@ -30,22 +31,14 @@ PROJECT CREATION: When initializing a project or creating multiple files for a f
 
 SURGICAL EDITS: For small changes (fix a typo, rename a variable, update a single line), use edit_file instead of write_file. edit_file replaces exact text without regenerating the entire file. This is faster and uses fewer tokens.
 
-CONTENT SEARCH: Use grep to search file contents for patterns (function names, imports, variables). It returns matching lines with line numbers. Use read_file with offset and limit to read specific sections of a file instead of the entire file.
+READ BEFORE EDIT: Always read a file with read_file before editing it with edit_file. You need the exact old_string as it appears in the file. Copy the exact text from the read_file output into your edit_file old_string. After writing or editing a file, use read_file or grep to verify the change was applied correctly before proceeding.
+`
 
-RESPONSE FORMATTING: Structure your responses using headings, bullet lists, and code blocks. Never output large unstructured paragraphs. Use concise, scannable formatting that makes the information easy to digest.
+// ── Ultra-short prompt for simple direct tasks (file writes, reads, commands) ──
+const MINIMAL_PROMPT = `You are NightCode, a coding assistant.
 
-IMAGE GENERATION:
-- When a user asks to generate, draw, create, or visualize an image → call generate_image immediately.
-- You MUST generate a unique image_id for each call (use a short UUID like "img_abc123").
-- Write a detailed, vivid prompt. The more specific, the better the result.
-- Choose aspect_ratio based on the request: portraits → 9:16, landscapes/wallpapers → 16:9, square/general → 1:1.
-- After the tool completes, write ONE short sentence describing what was generated. Do not re-describe the prompt.
-- You can generate multiple images in parallel by calling generate_image multiple times in one step.
-
-VISION / FILE UNDERSTANDING:
-- When the user attaches an image, you can see it directly. Describe, analyze, or use it as instructed.
-- When the user attaches a PDF or text file, the content is included in the message. Read and use it.
-- Always acknowledge attached files in your response.`
+Do not narrate. Call tools immediately. Do not explain what you will do — do it.
+Respond with a brief summary after all tool calls.`
 
 // ── BEAST-style prompt for fast/reasoning models (o-series, fast models) ──
 const BEAST_PROMPT = `You are NightCode — an autonomous coding agent. Keep going until the task is solved.
@@ -56,7 +49,6 @@ RULES:
 - Do the work. Do not plan. Do not describe what you will do. Call tools immediately.
 - If a tool call fails, fix the issue and retry. Do not give up.
 - If you need more context, search the codebase with grep and read files.
-- Use expert_agent for complex multi-file investigations or refactors.
 - When done, emit a concise summary. Do not narrate your process.
 
 ${/* The core rules from AGENT_PROMPT that apply to all modes: */""}
@@ -248,24 +240,67 @@ RIGHT: execute_workspace_script({ typescript_code: "async function run(workspace
 
 The user wants results, not plans. Write code. Call the tool. Then summarize.`
 
-export function buildSystemPrompt(mode?: "standard" | "caat" | "plan", mcpTools?: ToolImplementation[], modelId?: string): string {
+const SIMPLE_TASK_PATTERNS = [
+  /^create\s/i, /^write\s/i, /^make\s/i, /^new\s/i,
+  /^read\s/i, /^show\s/i, /^cat\s/i,
+  /^run\s/i, /^execute\s/i,
+  /^delete\s/i, /^remove\s/i,
+  /^edit\s/i, /^update\s/i, /^change\s/i,
+  /^rename\s/i, /^move\s/i, /^copy\s/i,
+]
 
-  const base = mode === "caat"
+export function isSimpleTask(userMessage: string): boolean {
+  const trimmed = userMessage.trim()
+  // Short messages (< 200 chars) that start with a simple action verb
+  if (trimmed.length > 200) return false
+  return SIMPLE_TASK_PATTERNS.some((p) => p.test(trimmed))
+}
+
+export function buildSystemPrompt(mode?: "standard" | "caat" | "plan", mcpTools?: ToolImplementation[], modelId?: string, userMessage?: string): string {
+
+  const basePrompt = mode === "caat"
     ? CAAT_PROMPT
     : mode === "plan"
       ? PLAN_PROMPT
-      : (modelId ? selectPrompt(modelId) : AGENT_PROMPT)
+      : (modelId
+        ? (userMessage && isSimpleTask(userMessage) ? MINIMAL_PROMPT : selectPrompt(modelId))
+        : (userMessage && isSimpleTask(userMessage) ? MINIMAL_PROMPT : AGENT_PROMPT))
 
-  if (!mcpTools || mcpTools.length === 0) return base
+  const workspaceRoot = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+  const envBlock = [
+    "<env>",
+    `  Working directory: ${workspaceRoot}`,
+    `  Platform: ${process.platform}`,
+    `  Today's date: ${new Date().toDateString()}`,
+    "</env>",
+  ].join("\n")
 
-  const mcpSection = mcpTools
-    .map((t) => `- ${t.name}: ${t.description}`)
-    .join("\n")
+  const pathGuidance = [
+    "FILE PATHS:",
+    `- Workspace root: ${workspaceRoot}`,
+    "- Use relative paths: package.json, src/index.ts",
+    "- Absolute paths also work: C:\\Projects\\app\\src\\index.ts",
+    "- NEVER use .. to navigate outside workspace",
+    "- When user gives you an absolute path, use it exactly as given",
+  ].join("\n")
 
-  return `${base}
+  const escapeHatch =
+    "TOOL AVAILABILITY:\n" +
+    "Some tools may not be available in every step. If you need a tool that is not listed, " +
+    'you can request it by outputting: {"request_capability": "editing"}\n' +
+    "Replace with: editing, filesystem, desktop, gmail, excel, word, browser, obsidian, command, media, or knowledge.\n" +
+    "The system will load the relevant tools and re-prompt you.\n\n"
 
-You also have access to these connected external tools:
-${mcpSection}`
+  let prompt = `Here is some useful information about the environment you are running in:\n${envBlock}\n\n${pathGuidance}\n\n${escapeHatch}${basePrompt}`
+
+  if (mcpTools && mcpTools.length > 0) {
+    const mcpSection = mcpTools
+      .map((t) => `- ${t.name}: ${t.description}`)
+      .join("\n")
+    prompt += `\n\nYou also have access to these connected external tools:\n${mcpSection}`
+  }
+
+  return prompt
 }
 
 // ── In-memory compaction cache ──────────────────────────────────────────────
@@ -294,7 +329,7 @@ function buildCompactionBlock(sessionId?: string): string | null {
 - Files: ${(s.files ?? []).join(", ") || "N/A"}
 - Next: ${(s.next ?? []).join(", ") || "N/A"}`
     } catch {
-      return null
+      return `Steps ${c.step_range_start}-${c.step_range_end}: ${c.summary.substring(0, 200)}`
     }
   }).filter(Boolean)
 

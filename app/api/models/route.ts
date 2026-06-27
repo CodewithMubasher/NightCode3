@@ -258,6 +258,41 @@ async function fetchFreeTheAIModels() {
   }
 }
 
+const LOCAL_AI_BASE = process.env.LOCAL_AI_URL
+  ? process.env.LOCAL_AI_URL.replace(/\/api\/chat$/, "")
+  : "http://127.0.0.1:8000"
+
+async function fetchLocalModels(): Promise<{ id: string; display_name: string; provider: string; provider_display_name: string }[]> {
+  try {
+    const res = await fetch(`${LOCAL_AI_BASE}/api/models`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return fallbackLocalModels()
+    const json = await res.json()
+    if (!Array.isArray(json) || json.length === 0) return fallbackLocalModels()
+    return json.map((m: any) => ({
+      id: m.id || "local-model",
+      display_name: m.display_name || m.id || "Local AI",
+      provider: "local",
+      provider_display_name: "Local AI",
+    }))
+  } catch {
+    return fallbackLocalModels()
+  }
+}
+
+function fallbackLocalModels(): { id: string; display_name: string; provider: string; provider_display_name: string }[] {
+  return [
+    { id: "gemini-3-pro", display_name: "Gemini 3 Pro", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash", display_name: "Gemini 3 Flash", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash-thinking", display_name: "Gemini 3 Flash Thinking", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-pro-plus", display_name: "Gemini 3 Pro Plus", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash-plus", display_name: "Gemini 3 Flash Plus", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash-thinking-plus", display_name: "Gemini 3 Flash Thinking Plus", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-pro-advanced", display_name: "Gemini 3 Pro Advanced", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash-advanced", display_name: "Gemini 3 Flash Advanced", provider: "local", provider_display_name: "Local AI" },
+    { id: "gemini-3-flash-thinking-advanced", display_name: "Gemini 3 Flash Thinking Advanced", provider: "local", provider_display_name: "Local AI" },
+  ]
+}
+
 async function fetchNvidiaModels() {
   try {
     const res = await fetch("https://integrate.api.nvidia.com/v1/models", {
@@ -416,12 +451,13 @@ export async function GET() {
     }
   }
 
-  groups.push({
-    label: "Local AI",
-    models: [
-      { id: "local-model", display_name: "Local AI Server", provider: "local", provider_display_name: "Local AI" },
-    ],
-  })
+  const localModels = await fetchLocalModels()
+  if (localModels.length > 0) {
+    groups.push({
+      label: "Local AI",
+      models: localModels,
+    })
+  }
 
   if (groups.length === 0) {
     groups.push({

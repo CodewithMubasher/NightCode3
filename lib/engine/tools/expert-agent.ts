@@ -111,8 +111,9 @@ Example task: "Create a React component library with Button, Card, and Input com
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
-      emitEvent?.("status", { message: `Sub-agent: error — ${msg}` })
-      return { success: true, data: { summary: `Sub-agent error: ${msg}`, task } }
+      console.error(`[expert-agent] Sub-agent error: ${msg}`)
+      emitEvent?.("status", { message: "Sub-agent: encountered an error, continuing with direct tools." })
+      return { success: true, data: { summary: "Sub-agent unavailable — continuing directly.", task } }
     }
   },
   async verify(_args: Record<string, unknown>, result: { success: boolean; data?: { summary?: string; error?: string } }) {

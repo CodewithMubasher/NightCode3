@@ -1,15 +1,10 @@
 import * as fs from "fs"
 import * as path from "path"
 
-const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+import { resolvePath as resolveWorkspacePath } from "../path-utils"
 
 function resolvePath(filePath: string): string {
-  let resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE, filePath)
-  resolved = path.normalize(resolved)
-  if (!resolved.startsWith(WORKSPACE)) {
-    throw new Error(`Path traversal denied: "${filePath}" is outside the workspace`)
-  }
-  return resolved
+  return resolveWorkspacePath(filePath)
 }
 
 // Detect binary files by looking for NUL bytes in the first 8KB.

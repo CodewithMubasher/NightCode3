@@ -1,15 +1,8 @@
 import * as fs from "fs"
-import * as path from "path"
-
-const WORKSPACE = path.resolve(process.env.BUILD_WORKSPACE || process.cwd())
+import { resolvePath as resolveWorkspacePath } from "../path-utils"
 
 function resolvePath(dirPath: string): string {
-  const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
-  const normalized = path.normalize(resolved)
-  if (!normalized.startsWith(WORKSPACE)) {
-    throw new Error(`Path traversal denied: "${dirPath}" is outside the workspace`)
-  }
-  return normalized
+  return resolveWorkspacePath(dirPath)
 }
 
 export const createFolderTool = {

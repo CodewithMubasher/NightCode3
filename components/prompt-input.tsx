@@ -61,13 +61,24 @@ function findModelEntry(modelGroups: ModelGroupData[], modelId: string, provider
       if (m.id === modelId) return m
     }
   }
-  return modelGroups[0]?.models[0] ?? null
+  return undefined
 }
 
 export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider }: PromptInputProps) {
   const settings = useNightCodeStore((s) => s.settings)
   const [modelGroups, setModelGroups] = React.useState<ModelGroupData[]>(cachedModelGroups ?? [])
-  const [selectedEntry, setSelectedEntry] = React.useState<ModelEntry>({ id: defaultModel ?? settings.defaultModel, display_name: defaultModel ?? settings.defaultModel, provider: defaultProvider ?? settings.defaultProvider, provider_display_name: defaultProvider ?? settings.defaultProvider })
+  const [selectedEntry, setSelectedEntry] = React.useState<ModelEntry>(() => {
+    if (cachedModelGroups) {
+      const entry = findModelEntry(cachedModelGroups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider)
+      if (entry) return entry
+    }
+    return {
+      id: defaultModel ?? settings.defaultModel,
+      display_name: defaultModel ?? settings.defaultModel,
+      provider: defaultProvider ?? settings.defaultProvider,
+      provider_display_name: defaultProvider ?? settings.defaultProvider,
+    }
+  })
   const [value, setValue] = React.useState("")
   const [attachments, setAttachments] = React.useState<AttachmentData[]>([])
   const [modelSearch, setModelSearch] = React.useState("")
@@ -93,13 +104,17 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
     }
   }, [])
 
+  const modelsLoadedRef = React.useRef(false)
   React.useEffect(() => {
     const groups = cachedModelGroups ?? modelGroups
-    if (groups.length > 0) {
-      const entry = findModelEntry(groups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider) ?? groups[0].models[0]
+    if (groups.length > 0 && !modelsLoadedRef.current) {
+      modelsLoadedRef.current = true
+      const entry = findModelEntry(groups, defaultModel ?? settings.defaultModel, defaultProvider ?? settings.defaultProvider)
+        ?? { id: defaultModel ?? settings.defaultModel, display_name: defaultModel ?? settings.defaultModel, provider: defaultProvider ?? settings.defaultProvider, provider_display_name: defaultProvider ?? settings.defaultProvider }
+      console.log(`[PromptInput] useEffect setSelectedEntry id="${entry.id}" provider="${entry.provider}" display="${entry.display_name}"`)
       setSelectedEntry(entry)
     }
-  }, [defaultModel, defaultProvider, settings.defaultModel, settings.defaultProvider, modelGroups])
+  }, [modelGroups])
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -173,6 +188,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       if (skills.some((s) => s.slug === slug)) skillSlugs.push(slug)
       return ""
     })
+    console.log(`[PromptInput] onSubmit model="${selectedEntry!.id}" provider="${selectedEntry!.provider}" display="${selectedEntry!.display_name}"`)
     onSubmit?.(trimmed, selectedEntry!.id, attachments.length > 0 ? attachments : undefined, selectedEntry!.provider, skillSlugs)
     setValue("")
     setAttachments([])
@@ -340,7 +356,7 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
             <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
               <PopoverTrigger asChild>
                 <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  <span className="max-w-28 truncate">{selectedEntry!.id}</span>
+                  <span className="max-w-28 truncate">{selectedEntry!.display_name}</span>
                   <ChevronDown size={12} />
                 </button>
               </PopoverTrigger>

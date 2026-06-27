@@ -3,8 +3,6 @@ import * as fs from "fs"
 import * as path from "path"
 import { EventEmitter } from "./event-emitter"
 import { buildSystemPrompt, buildRequest } from "./context-builder"
-import { classifyTools } from "./tool-classifier"
-import { classifyIntent } from "./intent-classifier"
 import { AGENT_CONFIG, CAAT_CONFIG, PLAN_CONFIG } from "./modes"
 import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
@@ -13,6 +11,7 @@ import { createFileSnapshot } from "@/lib/db/adapter"
 import type { DBFileSnapshot } from "@/lib/db/types"
 import { executeEngineRun } from "./engine-runner"
 import { WORKSPACE, generateId } from "./engine-utils"
+import { selectTools, type ToolCapabilityLog } from "./tool-capabilities"
 
 export interface EngineRunOptions {
   depth?: number
@@ -95,17 +94,14 @@ export class NightCodeEngine {
     compactionService?: CompactionService,
     options?: EngineRunOptions,
   ): Promise<string> {
-    const mode = options?.mode ?? "standard"
-    let currentMode: string = mode
-    if (mode === "standard") {
-      const lastUserMsg = messages.filter((m) => m.role === "user").pop()
-      const intent = lastUserMsg ? classifyIntent(lastUserMsg.content) : "quick"
-      currentMode = intent === "deep" ? "plan" : "standard"
-    }
+    const currentMode: string = options?.mode ?? "standard"
     const currentConfig =
       currentMode === "caat" ? CAAT_CONFIG : currentMode === "plan" ? PLAN_CONFIG : AGENT_CONFIG
 
-    const basePrompt = buildSystemPrompt(currentMode as "standard" | "caat" | "plan", mcpTools, model)
+    const lastUserMsg = messages[messages.length - 1]
+    const userText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : ""
+
+    const basePrompt = buildSystemPrompt(currentMode as "standard" | "caat" | "plan", mcpTools, model, userText)
     const fullSystemPrompt = skillInjected
       ? basePrompt + "\n\n" + skillInjected
       : basePrompt
@@ -120,11 +116,6 @@ export class NightCodeEngine {
       .map((t) => TOOL_REGISTRY[t.name])
       .filter(Boolean) as ToolImplementation[]
 
-    const expertAgentToolRef = TOOL_REGISTRY["expert_agent"]
-    if (expertAgentToolRef && (!options?.depth || options.depth < 1)) {
-      availableTools = [...availableTools, expertAgentToolRef]
-    }
-
     if (mcpTools) {
       availableTools = [...availableTools, ...mcpTools]
     }
@@ -134,20 +125,35 @@ export class NightCodeEngine {
       availableTools = availableTools.filter((t) => allowed.has(t.name))
     }
 
-    const userMessage = messages[messages.length - 1]
-    if (userMessage && userMessage.role === "user" && typeof userMessage.content === "string") {
-      const before = availableTools.length
-      availableTools = classifyTools(userMessage.content, availableTools)
-      console.log(`[engine] Tool filtering: ${before} → ${availableTools.length} tools`)
-    }
+    console.log(`[engine] Available tools (pre-filter): ${availableTools.map((t) => t.name).join(", ")}`)
 
-    const built = buildRequest(messages, fullSystemPrompt, messageId)
-    const requestSystemPrompt = built.system
+    // Capability-based tool selection (skipped for CAAT/PLAN modes)
+    if (userText && currentMode !== "caat" && currentMode !== "plan") {
+      // Collect tool names used in the last 3 assistant messages for bias
+      const prevToolNames: string[] = []
+      for (let i = messages.length - 1; i >= 0 && prevToolNames.length < 10; i--) {
+        const m = messages[i]
+        if (m.role === "assistant" && Array.isArray(m.content)) {
+          for (const c of m.content) {
+            if (c.type === "tool-call" && c.toolName) prevToolNames.push(c.toolName)
+          }
+        }
+      }
+      const result = selectTools(userText, prevToolNames, availableTools)
+      if (result.tools.length < availableTools.length) {
+        console.log(`[engine] Capability filter: ${availableTools.length} → ${result.tools.length} tools`)
+        console.log(`[engine] Capabilities: ${result.log.capabilities.map((c) => `${c.category}(${c.score})`).join(", ")}`)
+        availableTools = result.tools
+      }
+    }
 
     const strippedMessages = messages.map((m) => ({
       role: m.role,
       content: typeof m.content === "string" ? m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim() : m.content,
     }))
+
+    const built = buildRequest(strippedMessages as import("@/types").Message[], fullSystemPrompt, messageId)
+    const requestSystemPrompt = built.system
 
     const finalText = await executeEngineRun(
       messages,

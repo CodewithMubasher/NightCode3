@@ -60,6 +60,7 @@ export async function POST(req: Request) {
 
     const provider = (rawProvider || "opencode") as AIProvider
     const effectiveModel = model || "big-pickle"
+    console.log(`[api/chat] rawProvider="${rawProvider}" resolved="${provider}" model="${effectiveModel}"`)
 
     const encoder = new TextEncoder()
     const abortController = new AbortController()
@@ -100,7 +101,6 @@ export async function POST(req: Request) {
     })
 
     const MAX_QUEUE = 1024
-    const criticalEvents = new Set(["tool_start", "tool_end", "artifact", "thinking", "error", "message_complete", "usage", "ask"])
     let lastTextDelta: string | null = null
     let lastTextPayload: Record<string, unknown> | null = null
 
@@ -133,16 +133,19 @@ export async function POST(req: Request) {
 
     const unsubSSE = engine.subscribe((_event, data: any) => {
       if (abortController.signal.aborted) return
-      // Shed non-critical events when queue exceeds highWaterMark
-      if (data.type !== "text_delta" && !criticalEvents.has(data.type)) {
-        try {
-          writable.write(data)
-        } catch {
-          // drop on full buffer
-        }
-      } else {
-        writable.write(data).catch(() => {})
+
+      const FORWARDED_EVENTS = new Set([
+        "text_delta", "reasoning_delta", "tool_start", "tool_end",
+        "artifact", "error", "message_complete", "ask",
+        "confirmation", "usage", "thinking", "status", "permission",
+      ])
+
+      if (!FORWARDED_EVENTS.has(data.type)) {
+        console.warn(`[SSE] Unhandled event type dropped: ${data.type}`)
+        return
       }
+
+      writable.write(data).catch(() => {})
     })
 
     // Mirror all events to SQLite (dual runtime — no engine changes)

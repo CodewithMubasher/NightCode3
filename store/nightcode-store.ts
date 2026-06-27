@@ -598,6 +598,8 @@ export const useNightCodeStore = create<NightCodeState>()(
           const effectiveProvider = provider ?? chat.provider
           const effectiveModel = model ?? chat.model
 
+          console.log(`[sendMessage] provider param="${provider}" chat.provider="${chat.provider}" effective="${effectiveProvider}" model="${effectiveModel}" chat.model="${chat.model}"`)
+
           const response = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -645,12 +647,6 @@ export const useNightCodeStore = create<NightCodeState>()(
                   case "text_delta": {
                     const text = (parsed.payload?.text as string) ?? ""
                     if (text) {
-                      // Direct DOM write via CustomEvent — avoids Zustand re-render per token.
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("nc:token", {
-                          detail: { messageId: assistantMessage.id, text },
-                        }))
-                      }
                       get().updateMessageContent(chatId, assistantMessage.id, text)
                     }
                     break
@@ -673,7 +669,10 @@ export const useNightCodeStore = create<NightCodeState>()(
                   }
                   case "tool_start": {
                     const toolCallId = parsed.payload?.toolCallId as string
-                    if (!toolCallId) break
+                    if (!toolCallId) {
+                      console.warn("[SSE] tool_start missing toolCallId", parsed.payload)
+                      break
+                    }
                     const tool = (parsed.payload?.tool as string) ?? "unknown"
                     const args = (parsed.payload?.args as Record<string, unknown>) ?? {}
                     const ts: ToolState = {
@@ -683,6 +682,7 @@ export const useNightCodeStore = create<NightCodeState>()(
                       status: "running",
                       timestamp: parsed.timestamp ?? Date.now(),
                     }
+                    console.log(`[SSE] tool_start: ${tool} #${toolCallId}`)
                     get().updateToolState(chatId, assistantMessage.id, ts)
 
                     // ── Image generation: add shimmer placeholder immediately ──
@@ -710,25 +710,25 @@ export const useNightCodeStore = create<NightCodeState>()(
                   }
                   case "tool_end": {
                     const toolCallId = parsed.payload?.toolCallId as string
-                    if (!toolCallId) break
+                    if (!toolCallId) {
+                      console.warn("[SSE] tool_end missing toolCallId", parsed.payload)
+                      break
+                    }
                     const msg = get().chats.find((c) => c.id === chatId)
                       ?.messages.find((m) => m.id === assistantMessage.id)
-                    // The engine emits tool_end with tc.toolCallId (LLM's ID),
-                    // but tool_start registered under tc.generatedId (engine's ID).
-                    // Check both to find the existing tool state.
+                    // The engine emits tool_end with the same toolCallId as tool_start.
                     let existing = msg?.toolStates[toolCallId]
                     if (!existing && msg) {
-                      // Fallback: find by matching tool name from payload
+                      // Fallback: find the last running tool with matching name
                       const payloadTool = parsed.payload?.tool as string
                       if (payloadTool) {
-                        for (const ts of Object.values(msg.toolStates)) {
-                          if (ts.tool === payloadTool && ts.status === "running") {
-                            existing = ts
-                            break
-                          }
-                        }
+                        const candidates = Object.values(msg.toolStates)
+                          .filter((ts) => ts.tool === payloadTool && ts.status === "running")
+                          .sort((a, b) => b.timestamp - a.timestamp)
+                        existing = candidates[0]
                       }
                     }
+                    console.log(`[SSE] tool_end: ${existing?.tool ?? parsed.payload?.tool} #${toolCallId} status=${parsed.payload?.status}`)
 
                     // ── Image generation: resolve or fail the placeholder ──
                     const toolName = existing?.tool ?? (parsed.payload?.tool as string)
@@ -822,7 +822,11 @@ export const useNightCodeStore = create<NightCodeState>()(
                     const payload = parsed.payload as Record<string, unknown> | undefined
                     if (payload?.questions) {
                       get().setAskData({ questions: payload.questions as AskData["questions"] })
-                      get().updateMessageContent(chatId, assistantMessage.id, "Let me ask a few questions to tailor the response...")
+                      // Don't overwrite text if the LLM already provided content
+                      const existingMsg = get().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === assistantMessage.id)
+                      if (!existingMsg?.content?.trim()) {
+                        get().updateMessageContent(chatId, assistantMessage.id, "Let me ask a few questions to tailor the response...")
+                      }
                       get().updateMessageStatus(chatId, assistantMessage.id, "complete")
                     }
                     break
@@ -879,10 +883,19 @@ export const useNightCodeStore = create<NightCodeState>()(
           }
         } finally {
           // Clean up any shimmers that got stuck (engine crashed before tool_end)
-          set((s) => ({
-            chats: s.chats.map((c) =>
-              c.id === chatId
-                ? {
+          set((s) => {
+            const chatEntry = s.chats.find((c) => c.id === chatId)
+            const oldModel = chatEntry?.model
+            const oldProvider = chatEntry?.provider
+            const willUpdateModel = model && model !== oldModel
+            const willUpdateProvider = provider && provider !== oldProvider
+            if (willUpdateModel || willUpdateProvider) {
+              console.log(`[sendMessage] finally updating chat: model ${oldModel}→${willUpdateModel ? model : oldModel}, provider ${oldProvider}→${willUpdateProvider ? provider : oldProvider}`)
+            }
+            return {
+              chats: s.chats.map((c) => {
+                if (c.id === chatId) {
+                  return {
                     ...c,
                     ...(model && model !== c.model ? { model } : {}),
                     ...(provider && provider !== c.provider ? { provider } : {}),
@@ -898,10 +911,12 @@ export const useNightCodeStore = create<NightCodeState>()(
                       return m
                     }),
                   }
-                : c
-            ),
-            isStreaming: false,
-          }))
+                }
+                return c
+              }),
+              isStreaming: false,
+            }
+          })
           abortController = null
         }
       },
