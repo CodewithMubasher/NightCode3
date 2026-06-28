@@ -28,7 +28,9 @@ export async function GET() {
         descLines.push(trimmed)
       }
       const description = descLines.length > 0 ? descLines.join(" ") : undefined
-      return { slug, title, description }
+      const tagsMatch = content.match(/<!--\s*tags:\s*([\w\s,]+)\s*-->/i)
+      const tags = tagsMatch ? tagsMatch[1].split(",").map((t) => t.trim().toLowerCase()).filter(Boolean) : undefined
+      return { slug, title, description, tags }
     })
     return NextResponse.json(skills)
   } catch {

@@ -8,7 +8,7 @@ import { streamLocal } from "./providers/local"
 
 const OPENAI_COMPATIBLE = new Set([
   "groq", "openai", "openrouter", "opencode", "xiaomi",
-  "cerebras", "routeway", "naga", "sambanova", "freetheai", "cloudflare", "nvidia",
+  "cerebras", "naga", "sambanova", "freetheai", "cloudflare", "nvidia",
 ])
 
 export async function streamChat(

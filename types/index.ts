@@ -68,7 +68,7 @@ export interface Chat {
   projectId?: string
 }
 
-export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "ollama" | "xiaomi" | "cerebras" | "routeway" | "naga" | "sambanova" | "cloudflare" | "freetheai" | "nvidia" | "local"
+export type AIProvider = "groq" | "openai" | "openrouter" | "google" | "opencode" | "ollama" | "xiaomi" | "cerebras" | "naga" | "sambanova" | "cloudflare" | "freetheai" | "nvidia" | "local"
 
 export type View = "chat" | "settings" | "projects"
 
@@ -76,6 +76,7 @@ export interface SkillInfo {
   slug: string
   title: string
   description?: string
+  tags?: string[]
 }
 
 export interface AskOption {

@@ -1,5 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
+import type { ToolImplementation } from "./tools"
 
 export function generateId(): string {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -109,7 +110,7 @@ export const toolAliases: Record<string, string> = {
 const TOOL_SETS: Record<string, string[]> = {
   create: ["write_file", "create_folder", "read_file", "list_directory", "edit_file", "grep"],
   read:   ["read_file", "list_directory", "grep", "search_files", "search_memories"],
-  command: ["execute_command", "read_file", "write_file", "get_errors", "run_tests"],
+  command: ["shell", "read_file", "write_file", "get_errors", "run_tests"],
 }
 
 const REQUEST_PATTERNS: Array<{ regex: RegExp; set: string }> = [
@@ -125,21 +126,12 @@ const REQUEST_PATTERNS: Array<{ regex: RegExp; set: string }> = [
   { regex: /analyze|review|investigate|explore|audit/i, set: "read" },
 ]
 
-export function getToolsForRequest(userMessage: string, allTools: string[]): string[] {
-  const trimmed = userMessage.trim()
-  if (trimmed.length > 300) return allTools // long messages = complex = all tools
-
-  for (const { regex, set } of REQUEST_PATTERNS) {
-    if (regex.test(trimmed)) {
-      const subset = TOOL_SETS[set]
-      // Always include essential navigation tools
-      const essentials = ["read_file", "list_directory", "grep", "search_files"]
-      const combined = [...new Set([...subset, ...essentials])]
-      // Filter to only include tools that exist in the full registry
-      const available = combined.filter((t) => allTools.includes(t))
-      if (available.length > 0) return available
-    }
-  }
-
+export function getToolsForRequest(
+  message: string,
+  allTools: ToolImplementation[]
+): ToolImplementation[] {
+  // TEMPORARY: Return all tools always
+  // The capability filter was causing more harm than good
+  // Will be reintroduced after core stability is achieved
   return allTools
 }

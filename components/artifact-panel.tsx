@@ -20,11 +20,21 @@ function isTypingTarget(target: EventTarget | null) {
 
 export function ArtifactPanel() {
   const chats = useNightCodeStore((s) => s.chats)
+  const isStreaming = useNightCodeStore((s) => s.isStreaming)
   const [panelWidth, setPanelWidth] = useState(420)
   const [isOpen, setIsOpen] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
   const isResizing = useRef(false)
   const [dbArtifacts, setDbArtifacts] = useState<Artifact[]>([])
+  const prevStreaming = useRef(isStreaming)
+
+  // FIX: Track the last message ID to detect when a new assistant message lands.
+  // This is more reliable than watching chats (which fires on every text-delta)
+  // or isStreaming (which fires before the DB write completes).
+  const lastMessageId = useMemo(() => {
+    const allMessages = chats.flatMap((c) => c.messages)
+    return allMessages.at(-1)?.id ?? null
+  }, [chats])
 
   const artifacts: Artifact[] = useMemo(() => {
     const fromStore = chats.flatMap((c) => c.messages.flatMap((m) => m.artifacts))
@@ -34,13 +44,66 @@ export function ArtifactPanel() {
     return Array.from(merged.values())
   }, [dbArtifacts, chats])
 
-  useEffect(() => {
-    if (!isOpen) return
+  const fetchArtifacts = useCallback(() => {
     fetch("/api/artifacts")
       .then((r) => r.json())
       .then((data) => setDbArtifacts(data.artifacts ?? []))
       .catch(() => {})
-  }, [isOpen, chats])
+  }, [])
+
+  // Fetch on open (one-time, not on every chats update)
+  useEffect(() => {
+    if (isOpen) fetchArtifacts()
+  }, [isOpen, fetchArtifacts])
+
+  // FIX 1: Re-fetch when streaming stops — but add a small delay (300ms) so
+  // the DB write from the tool has time to commit before we read it back.
+  // The old code had no delay, so we raced the DB write.
+  useEffect(() => {
+    if (prevStreaming.current && !isStreaming) {
+      // Panel may be closed — still fetch so state is ready when user opens it
+      const timer = setTimeout(() => fetchArtifacts(), 300)
+      prevStreaming.current = isStreaming
+      return () => clearTimeout(timer)
+    }
+    prevStreaming.current = isStreaming
+  }, [isStreaming, fetchArtifacts])
+
+  // FIX 2: Listen for the SSE "artifact" event the engine emits.
+  // The route.ts already sends type:"artifact" via forwardToSSE → sessionEventToSSE.
+  // We just need a custom window event listener here to react immediately
+  // instead of waiting for the stream-end poll.
+  // Your SSE client (wherever it parses events) should dispatch:
+  //   window.dispatchEvent(new CustomEvent("nightcode:artifact", { detail: artifact }))
+  // when it receives a type="artifact" SSE frame.
+  useEffect(() => {
+    function handleArtifactEvent(e: Event) {
+      const artifact = (e as CustomEvent).detail as Artifact
+      if (!artifact?.id) return
+      setDbArtifacts((prev) => {
+        if (prev.some((a) => a.id === artifact.id)) return prev
+        return [...prev, artifact]
+      })
+      // Auto-open the panel and select the new artifact when one arrives
+      setIsOpen(true)
+      setActiveArtifactId(artifact.id)
+    }
+    window.addEventListener("nightcode:artifact", handleArtifactEvent)
+    return () => window.removeEventListener("nightcode:artifact", handleArtifactEvent)
+  }, [])
+
+  // FIX 3: Also re-fetch when a new message lands (lastMessageId changes)
+  // and the panel is already open. This catches artifacts from DB-only paths.
+  const prevLastMessageId = useRef(lastMessageId)
+  useEffect(() => {
+    if (prevLastMessageId.current !== lastMessageId && isOpen) {
+      // Small delay to let DB writes settle
+      const timer = setTimeout(() => fetchArtifacts(), 500)
+      prevLastMessageId.current = lastMessageId
+      return () => clearTimeout(timer)
+    }
+    prevLastMessageId.current = lastMessageId
+  }, [lastMessageId, isOpen, fetchArtifacts])
 
   const totalSize = artifacts.reduce((sum, a) => sum + a.content.length, 0)
   const storageLabel = totalSize > 1024 * 1024
@@ -233,7 +296,7 @@ export function ArtifactPanel() {
                   onBlur={handleSave}
                   onKeyDown={handleEditKeyDown}
                   className="w-full min-h-[300px] resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-relaxed text-[oklch(0.95_0_0)] outline-none font-sans hide-scrollbar"
-                  style={{ fieldSizing: "content" }}
+                  style={{ fieldSizing: "content" } as React.CSSProperties}
                 />
               ) : (
                 <div

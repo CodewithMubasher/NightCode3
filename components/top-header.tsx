@@ -3,6 +3,7 @@
 import * as React from "react"
 import { usePathname } from "next/navigation"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+
 import { useTheme } from "next-themes"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { FileText, Sun, Moon } from "lucide-react"

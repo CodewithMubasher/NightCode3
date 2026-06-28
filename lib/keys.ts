@@ -22,7 +22,7 @@ const PROVIDER_KEYS: { env_name: string; display_name: string }[] = [
   { env_name: "DEEPSEEK_API_KEY", display_name: "DeepSeek" },
   { env_name: "XIAOMI_API_KEY", display_name: "Xiaomi" },
   { env_name: "CEREBRAS_API_KEY", display_name: "Cerebras" },
-  { env_name: "ROUTEWAY_API_KEY", display_name: "Routeway" },
+  
   { env_name: "SAMBANOVA_API_KEY", display_name: "SambaNova" },
   { env_name: "OLLAMA_CLOUD_API_KEY", display_name: "Ollama Cloud" },
   { env_name: "FREETHEAI_API_KEY", display_name: "FreeTheAI" },

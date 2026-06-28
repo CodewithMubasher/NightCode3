@@ -30,6 +30,7 @@ interface NightCodeState {
   pendingConfirmation: PendingConfirmation | null
   dismissConfirmation: () => void
   settings: AppSettings
+  recentModels: Array<{ id: string; provider: string; display_name: string }>
   previewFilePath: string | null
   isPreviewOpen: boolean
   openPreview: (path: string) => void
@@ -76,6 +77,7 @@ interface NightCodeState {
   submitAskAnswers: (chatId: string, answers: Record<string, unknown>) => Promise<void>
 
   setSettings: (settings: Partial<AppSettings>) => void
+  addRecentModel: (model: { id: string; provider: string; display_name: string }) => void
   clearAll: () => void
 }
 
@@ -94,11 +96,12 @@ export const useNightCodeStore = create<NightCodeState>()(
       statusMessage: null,
       askData: null,
       pendingConfirmation: null,
+      recentModels: [],
       settings: {
         theme: "dark",
         primaryColor: "#D97757",
-        defaultModel: "big-pickle",
-        defaultProvider: "opencode",
+        defaultModel: "gemini-2.5-flash",
+        defaultProvider: "google",
         temperature: 0.7,
         maxTokens: 4096,
         soundEnabled: false,
@@ -113,8 +116,8 @@ export const useNightCodeStore = create<NightCodeState>()(
           id,
           title: "New Chat",
           messages: [],
-          model: model ?? "big-pickle",
-          provider: provider ?? "opencode",
+          model: model ?? "gemini-2.5-flash",
+          provider: provider ?? "google",
           createdAt: now,
           updatedAt: now,
           projectId,
@@ -410,8 +413,8 @@ export const useNightCodeStore = create<NightCodeState>()(
           id: chatId,
           title: name,
           messages: [],
-          model: "big-pickle",
-          provider: "opencode",
+          model: get().settings.defaultModel ?? "gemini-2.5-flash",
+          provider: get().settings.defaultProvider ?? "google",
           createdAt: chatNow,
           updatedAt: chatNow,
           projectId: id,
@@ -461,6 +464,8 @@ export const useNightCodeStore = create<NightCodeState>()(
         set({ isStreaming: true })
         const chat = get().chats.find((c) => c.id === chatId)
         if (!chat) { set({ isStreaming: false }); return }
+
+        console.log(`sendMessage: explicit provider="${provider}" chat.provider="${chat.provider}" chat.model="${chat.model}" settings.defaultProvider="${get().settings.defaultProvider}"`)
 
         const prevModel = chat.model
         if (model && prevModel && model !== prevModel) {
@@ -527,8 +532,8 @@ export const useNightCodeStore = create<NightCodeState>()(
               ? {
                   ...c,
                   title: updatedTitle,
-                  model: model ?? c.model,
-                  provider: provider ?? c.provider,
+                  ...(model ? { model } : {}),
+                  ...(provider ? { provider } : {}),
                   messages: [...c.messages, userMessage, assistantMessage],
                   updatedAt: Date.now(),
                 }
@@ -595,8 +600,8 @@ export const useNightCodeStore = create<NightCodeState>()(
             return { role: m.role, content: parts }
           })
 
-          const effectiveProvider = provider ?? chat.provider
-          const effectiveModel = model ?? chat.model
+          const effectiveProvider = provider ?? get().settings.defaultProvider ?? chat.provider
+          const effectiveModel = model ?? get().settings.defaultModel ?? chat.model
 
           console.log(`[sendMessage] provider param="${provider}" chat.provider="${chat.provider}" effective="${effectiveProvider}" model="${effectiveModel}" chat.model="${chat.model}"`)
 
@@ -923,6 +928,13 @@ export const useNightCodeStore = create<NightCodeState>()(
 
       setSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
+      addRecentModel: (model) =>
+        set((s) => {
+          const filtered = s.recentModels.filter(
+            (m) => !(m.id === model.id && m.provider === model.provider),
+          )
+          return { recentModels: [model, ...filtered].slice(0, 8) }
+        }),
       setAskData: (data) => set({ askData: data }),
       setPendingConfirmation: (data) => set({ pendingConfirmation: data }),
       confirmDeletion: async (chatId) => {
@@ -1000,7 +1012,8 @@ export const useNightCodeStore = create<NightCodeState>()(
         }
         set({ askData: null })
         if (lines.length === 0) return
-        await get().sendMessage(chatId, lines.join("\n\n"))
+        const askChat = get().chats.find((c) => c.id === chatId)
+        await get().sendMessage(chatId, lines.join("\n\n"), undefined, undefined, askChat?.model, askChat?.provider)
       },
       clearAll: () => set({ chats: [], activeChatId: null }),
       openPreview: (path) => set({ previewFilePath: path, isPreviewOpen: true }),
@@ -1009,12 +1022,25 @@ export const useNightCodeStore = create<NightCodeState>()(
     }),
     {
       name: "nightcode-store",
-      version: 1,
+      version: 2,
+      migrate: (persisted: unknown, version: number) => {
+        const state = { ...(persisted as Record<string, unknown>) } as Record<string, unknown>
+        if (version < 2) {
+          const oldSettings = (state.settings as Record<string, unknown>) ?? {}
+          state.settings = {
+            ...oldSettings,
+            defaultModel: "gemini-2.5-flash",
+            defaultProvider: "google",
+          }
+        }
+        return state as unknown as NightCodeState
+      },
       partialize: (state) => ({
         chats: state.chats,
         activeChatId: state.activeChatId,
         projects: state.projects,
         settings: state.settings,
+        recentModels: state.recentModels,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return

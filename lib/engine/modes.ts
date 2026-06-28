@@ -41,7 +41,7 @@ export const AGENT_CONFIG: ModeConfig = {
     { name: "delete_file" },
     { name: "create_folder" },
     { name: "search_files" },
-    { name: "execute_command" },
+    { name: "shell" },
     { name: "create_artifact" },
     { name: "list_artifacts" },
     { name: "read_artifact" },

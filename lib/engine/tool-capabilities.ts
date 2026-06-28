@@ -57,7 +57,7 @@ const BUILTIN_TAGS: Record<string, ToolTag> = {
     category: "filesystem",
     essential: false,
   },
-  execute_command: {
+  shell: {
     tags: ["run", "execute", "command", "shell", "terminal", "npm", "npx", "yarn", "pnpm", "pip", "node", "python", "bash", "cmd", "powershell", "install", "build", "test", "deploy", "compile", "start", "dev", "serve"],
     synonyms: ["launch", "invoke", "trigger", "perform", "do", "process", "script", "task"],
     category: "system",
@@ -370,7 +370,7 @@ const CAPABILITY_TOOLS: Record<string, string[]> = {
   word: ["ms_office_mcp_word_create_blank", "ms_office_mcp_word_add_paragraph", "ms_office_mcp_word_add_table", "ms_office_mcp_word_add_heading"],
   browser: ["playwright_browser_navigate", "playwright_browser_click", "playwright_browser_type", "playwright_browser_snapshot", "playwright_browser_take_screenshot", "playwright_browser_fill_form"],
   obsidian: ["obsidian_mcp_read_note", "obsidian_mcp_write_note", "obsidian_mcp_search_notes", "obsidian_mcp_list_notes"],
-  command: ["execute_command", "run_tests", "get_errors"],
+  command: ["shell", "run_tests", "get_errors"],
   media: ["generate_image"],
   knowledge: ["create_artifact", "list_artifacts", "read_artifact", "edit_artifact", "search_memories"],
 }

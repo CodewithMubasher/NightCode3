@@ -146,8 +146,14 @@ export function formatOpenAIMessages(
         let content: string
         if (output && typeof output === "object" && !Array.isArray(output)) {
           const o = output as Record<string, unknown>
-          const value = (o.type === "json" && "value" in o) ? o.value : output
-          content = typeof value === "string" ? value : JSON.stringify(value)
+          if (o.type === "text" && typeof o.text === "string") {
+            content = o.text
+          } else if (o.type === "json" && "value" in o) {
+            const value = o.value
+            content = typeof value === "string" ? value : JSON.stringify(value)
+          } else {
+            content = JSON.stringify(output)
+          }
         } else if (typeof output === "string") {
           content = output
         } else {

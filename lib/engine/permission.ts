@@ -17,7 +17,7 @@ const DANGEROUS_TOOLS: Record<string, (args: Record<string, unknown>) => string 
     }
     return `Delete file: ${path}`
   },
-  execute_command: (args) => {
+  shell: (args) => {
     const cmd = args.command as string
     if (!cmd) return null
     const dangerous = ["rm -rf", "rmdir /s", "del /f", "format", "mkfs", "dd if=", "> /dev/"]

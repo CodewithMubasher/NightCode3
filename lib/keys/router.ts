@@ -25,7 +25,7 @@ const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   ollama:    { envBase: "OLLAMA_CLOUD_API_KEY",       maxSuffixed: 0,  authType: "BEARER" },
   xiaomi:    { envBase: "XIAOMI_API_KEY",             maxSuffixed: 0,  authType: "BEARER" },
   cerebras:  { envBase: "CEREBRAS_API_KEY",           maxSuffixed: 0,  authType: "BEARER" },
-  routeway:  { envBase: "ROUTEWAY_API_KEY",           maxSuffixed: 0,  authType: "BEARER" },
+
   naga:      { envBase: "NAGA_API_KEY",               maxSuffixed: 0,  authType: "BEARER" },
   sambanova: { envBase: "SAMBANOVA_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
   freetheai: { envBase: "FREETHEAI_API_KEY",          maxSuffixed: 0,  authType: "BEARER" },
@@ -149,8 +149,7 @@ export function getBaseUrl(provider: string, model: string, includeKey: boolean,
       return `https://api.xiaomimimo.com/v1/chat/completions`
     case "cerebras":
       return `https://api.cerebras.ai/v1/chat/completions`
-    case "routeway":
-      return `https://api.routeway.ai/v1/chat/completions`
+
     case "naga":
       return `https://api.naga.ac/v1/chat/completions`
     case "sambanova":

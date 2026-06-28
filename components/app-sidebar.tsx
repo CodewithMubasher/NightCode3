@@ -63,6 +63,7 @@ export function AppSidebar() {
   const router = useRouter()
   const [hydrated, setHydrated] = React.useState(false)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [menuOpenChatId, setMenuOpenChatId] = React.useState<string | null>(null)
   React.useEffect(() => { setHydrated(true) }, [])
   const chats = useNightCodeStore((s) => s.chats)
   const projects = useNightCodeStore((s) => s.projects)
@@ -80,7 +81,7 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarSeparator />
-      <div className="shrink-0">
+      <SidebarContent className="mobile-sidebar-content">
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -140,17 +141,22 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-      </div>
-      <SidebarSeparator />
-      <SidebarContent className="mobile-sidebar-content">
-        <SidebarGroup>
+        <SidebarSeparator />
+        <SidebarGroup className="min-h-0 flex-1 overflow-y-auto">
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {recentChats.map((chat) => {
+                const isMenuOpen = menuOpenChatId === chat.id
                 return (
                   <SidebarMenuItem key={chat.id}>
-                    <div className="group relative flex items-center">
+                    <div
+                      className="sidebar-chat-row relative flex items-center"
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setMenuOpenChatId(chat.id)
+                      }}
+                    >
                       <SidebarMenuButton asChild>
                         <Link
                           href={`/chat/${chat.id}`}
@@ -159,19 +165,20 @@ export function AppSidebar() {
                           <span className="truncate">{chat.title.length > 25 ? `${chat.title.slice(0, 25)}...` : chat.title}</span>
                         </Link>
                       </SidebarMenuButton>
-                      <DropdownMenu>
+                      <DropdownMenu open={isMenuOpen} onOpenChange={(open) => { if (!open) setMenuOpenChatId(null) }}>
                         <DropdownMenuTrigger asChild>
                           <button
-                            onClick={(e) => e.stopPropagation()}
-                            className="absolute right-1 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover:opacity-100"
+                            onClick={(e) => { e.stopPropagation(); setMenuOpenChatId(chat.id) }}
+                            className="sidebar-chat-dots absolute right-1 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                             aria-label="Chat options"
                           >
                             <MoreHorizontal size={14} />
                           </button>
                         </DropdownMenuTrigger>
-                          <DropdownMenuContent side="right" align="start" className="w-48">
+                        <DropdownMenuContent side="right" align="start" className="w-48">
                           <DropdownMenuItem
                             onClick={() => {
+                              setMenuOpenChatId(null)
                               const title = prompt("Rename chat:", chat.title)
                               if (title?.trim()) useNightCodeStore.getState().renameChat(chat.id, title.trim())
                             }}
@@ -181,6 +188,7 @@ export function AppSidebar() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
+                              setMenuOpenChatId(null)
                               useNightCodeStore.getState().deleteChat(chat.id)
                               if (window.location.pathname === `/chat/${chat.id}`) router.push("/")
                             }}
@@ -189,43 +197,49 @@ export function AppSidebar() {
                             <Trash2 size={14} />
                             <span>Delete</span>
                           </DropdownMenuItem>
-                          <DropdownMenuSub>
-                            <DropdownMenuSubTrigger className="whitespace-nowrap">
-                              <ArrowRightFromLine size={14} />
-                              <span>Move to project</span>
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuPortal>
-                              <DropdownMenuSubContent>
-                                {projects.map((p) => (
+                          {projects.length > 0 && (
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger className="whitespace-nowrap">
+                                <ArrowRightFromLine size={14} />
+                                <span>Move to project</span>
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuPortal>
+                                <DropdownMenuSubContent>
+                                  {projects.map((p) => (
+                                    <DropdownMenuItem
+                                      key={p.id}
+                                      onClick={() => {
+                                        setMenuOpenChatId(null)
+                                        useNightCodeStore.getState().moveChatToProject(chat.id, p.id)
+                                      }}
+                                    >
+                                      <Folder size={14} />
+                                      <span>{p.name}</span>
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    key={p.id}
-                                    onClick={() => useNightCodeStore.getState().moveChatToProject(chat.id, p.id)}
+                                    onClick={() => {
+                                      setMenuOpenChatId(null)
+                                      useNightCodeStore.getState().moveChatToProject(chat.id, null)
+                                    }}
                                   >
-                                    <Folder size={14} />
-                                    <span>{p.name}</span>
+                                    <Minus size={14} />
+                                    <span>Remove from project</span>
                                   </DropdownMenuItem>
-                                ))}
-                                {projects.length === 0 && (
-                                  <DropdownMenuItem disabled>
-                                    <span>No projects yet</span>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setMenuOpenChatId(null)
+                                      router.push("/projects")
+                                    }}
+                                  >
+                                    <Plus size={14} />
+                                    <span>New project</span>
                                   </DropdownMenuItem>
-                                )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => useNightCodeStore.getState().moveChatToProject(chat.id, null)}
-                                >
-                                  <Minus size={14} />
-                                  <span>Remove from project</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => router.push("/projects")}
-                                >
-                                  <Plus size={14} />
-                                  <span>New project</span>
-                                </DropdownMenuItem>
-                              </DropdownMenuSubContent>
-                            </DropdownMenuPortal>
-                          </DropdownMenuSub>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuPortal>
+                            </DropdownMenuSub>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -309,6 +323,9 @@ export function AppSidebar() {
         [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(8) { animation-delay: 0.16s; }
         [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(9) { animation-delay: 0.18s; }
         [data-mobile="true"] .mobile-sidebar-content .sidebar-group-content > div > div:nth-child(10) { animation-delay: 0.2s; }
+        .sidebar-chat-row:hover .sidebar-chat-dots {
+          opacity: 1;
+        }
       `}</style>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Sidebar>

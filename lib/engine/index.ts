@@ -11,7 +11,6 @@ import { createFileSnapshot } from "@/lib/db/adapter"
 import type { DBFileSnapshot } from "@/lib/db/types"
 import { executeEngineRun } from "./engine-runner"
 import { WORKSPACE, generateId } from "./engine-utils"
-import { selectTools, type ToolCapabilityLog } from "./tool-capabilities"
 
 export interface EngineRunOptions {
   depth?: number
@@ -127,25 +126,8 @@ export class NightCodeEngine {
 
     console.log(`[engine] Available tools (pre-filter): ${availableTools.map((t) => t.name).join(", ")}`)
 
-    // Capability-based tool selection (skipped for CAAT/PLAN modes)
-    if (userText && currentMode !== "caat" && currentMode !== "plan") {
-      // Collect tool names used in the last 3 assistant messages for bias
-      const prevToolNames: string[] = []
-      for (let i = messages.length - 1; i >= 0 && prevToolNames.length < 10; i--) {
-        const m = messages[i]
-        if (m.role === "assistant" && Array.isArray(m.content)) {
-          for (const c of m.content) {
-            if (c.type === "tool-call" && c.toolName) prevToolNames.push(c.toolName)
-          }
-        }
-      }
-      const result = selectTools(userText, prevToolNames, availableTools)
-      if (result.tools.length < availableTools.length) {
-        console.log(`[engine] Capability filter: ${availableTools.length} → ${result.tools.length} tools`)
-        console.log(`[engine] Capabilities: ${result.log.capabilities.map((c) => `${c.category}(${c.score})`).join(", ")}`)
-        availableTools = result.tools
-      }
-    }
+    // NOTE: Capability-based tool selection was removed.
+    // All tools are sent to every request. Optimize later.
 
     const strippedMessages = messages.map((m) => ({
       role: m.role,

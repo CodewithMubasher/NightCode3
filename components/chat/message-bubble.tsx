@@ -146,7 +146,7 @@ function GeneratedImageCard({ image }: { image: GeneratedImage }) {
 
 function toolIcon(toolName: string) {
   const mcpMatch = toolName.match(/^(.+?)_(.+)_(.+)/)
-  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","execute_command","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent","generate_image"].includes(toolName)) {
+  if (mcpMatch && !["read_file","write_file","list_directory","delete_file","shell","think","create_artifact","create_folder","search_files","skill","delegate_task","expert_agent","generate_image"].includes(toolName)) {
     const action = mcpMatch[3]
     if (action.includes("screenshot") || action.includes("screen_shot")) return Camera
     if (action.includes("send") || action.includes("email") || action.includes("mail")) return Mail
@@ -162,7 +162,7 @@ function toolIcon(toolName: string) {
     case "write_file": return FilePen
     case "list_directory": return List
     case "delete_file": return Trash2
-    case "execute_command": return Terminal
+    case "shell": return Terminal
     case "create_artifact": return FilePen
     case "edit_artifact": return FilePen
     case "list_artifacts": return List
@@ -251,8 +251,12 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   const isRunning = toolState.status === "running"
   const isFailed = toolState.status === "error" || toolState.status === "verification_failed"
 
-  const iconColor = isFailed ? "#EF4444" : "#B3B3B3"
-  const textColor = isFailed ? "#EF4444" : "#E0E0E0"
+  const execResult = toolState.tool === "shell" ? toolState.result as ({ exitCode?: number; succeeded?: boolean } | undefined) : undefined
+  const execFailed = execResult?.succeeded === false || execResult?.exitCode === -1
+  const exitCode = execResult?.exitCode
+
+  const iconColor = isFailed || execFailed ? "#EF4444" : "#B3B3B3"
+  const textColor = isFailed || execFailed ? "#EF4444" : "#E0E0E0"
 
   const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
   const isDelegate = toolState.tool === "delegate_task" || toolState.tool === "expert_agent"
@@ -269,7 +273,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     edit_artifact: (a) => a ?? "Edited artifact",
     list_directory: (a) => a ? `Listed ${a}` : "Listed directory",
     search_files: () => "Searched files",
-    execute_command: () => "Run command",
+    shell: () => exitCode != null ? (execFailed ? `Failed (exit ${exitCode})` : `Done (exit ${exitCode})`) : "Run command",
     think: () => "Thinking",
     skill: () => "Read skill",
     delegate_task: () => "Sub-agent",
@@ -506,10 +510,16 @@ function Timeline({ toolStates, message }: { toolStates: Record<string, ToolStat
             }}
           >
             <div className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-background" style={{ width: 22, height: 22 }}>
-              <CheckCircle2 className="size-3.5 text-emerald-500" />
+              {message.hasError || entries.some((ts) => ts.tool === "shell" && (ts.result as Record<string, unknown> | undefined)?.succeeded === false) ? (
+                <span className="size-3.5 text-red-400 text-[10px] font-bold flex items-center justify-center">!</span>
+              ) : (
+                <CheckCircle2 className="size-3.5 text-emerald-500" />
+              )}
             </div>
             <div className="flex min-w-0 flex-1 items-center">
-              <span className="text-[14px] font-sans" style={{ color: "#B3B3B3" }}>Done</span>
+              <span className="text-[14px] font-sans" style={{ color: message.hasError || entries.some((ts) => ts.tool === "shell" && (ts.result as Record<string, unknown> | undefined)?.succeeded === false) ? "#EF4444" : "#B3B3B3" }}>
+                {message.hasError ? "Error" : entries.some((ts) => ts.tool === "shell" && (ts.result as Record<string, unknown> | undefined)?.succeeded === false) ? "Some commands failed" : "Done"}
+              </span>
             </div>
           </div>
         )}
@@ -685,7 +695,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           </div>
 
-          {message.content && !hasRunningTools && (
+          {message.content && (
             <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
               {renderInlineMarkdown(message.content)}
             </div>

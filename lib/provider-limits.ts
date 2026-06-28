@@ -32,7 +32,7 @@ export function getProviderLimits(provider: string, model: string): ProviderLimi
     opencode:   { rpm: 20,  rpd: 500,    tpm: 150000,  tpd: 5000000 },
     ollama:     { rpm: 15,  rpd: 400,    tpm: 100000,  tpd: 250000 },
     xiaomi:     { rpm: 20,  rpd: 100,    tpm: 100000,  tpd: null },
-    routeway:   { rpm: 10,  rpd: 100,    tpm: null,    tpd: null },
+  
     naga:       { rpm: 15,  rpd: 120,    tpm: 40000,   tpd: 150000 },
     sambanova:  { rpm: 30,  rpd: 1000,   tpm: 80000,   tpd: 2000000 },
     cloudflare: { rpm: 300, rpd: 100,    tpm: null,    tpd: null },

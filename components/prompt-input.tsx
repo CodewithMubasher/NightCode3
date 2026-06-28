@@ -7,13 +7,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu"
-import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Plus, Brain, Mic } from "lucide-react"
+
+import { Check, ChevronDown, ArrowUp, Paperclip, Search, StopCircle, Scroll, Mic } from "lucide-react"
 import {
   Attachments,
   Attachment,
@@ -49,6 +44,10 @@ interface PromptInputProps {
   defaultProvider?: string
 }
 
+export interface PromptInputHandle {
+  setInputValue: (val: string) => void
+}
+
 interface ModelGroupData {
   label: string
   models: ModelEntry[]
@@ -64,7 +63,7 @@ function findModelEntry(modelGroups: ModelGroupData[], modelId: string, provider
   return undefined
 }
 
-export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider }: PromptInputProps) {
+export const PromptInput = React.forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider }, ref) {
   const settings = useNightCodeStore((s) => s.settings)
   const [modelGroups, setModelGroups] = React.useState<ModelGroupData[]>(cachedModelGroups ?? [])
   const [selectedEntry, setSelectedEntry] = React.useState<ModelEntry>(() => {
@@ -115,6 +114,17 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       setSelectedEntry(entry)
     }
   }, [modelGroups])
+
+  React.useImperativeHandle(ref, () => ({
+    setInputValue(val: string) {
+      setValue(val)
+      React.startTransition(() => {
+        textareaRef.current?.focus()
+        const len = val.length
+        textareaRef.current?.setSelectionRange(len, len)
+      })
+    },
+  }), [])
 
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -189,6 +199,11 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       return ""
     })
     console.log(`[PromptInput] onSubmit model="${selectedEntry!.id}" provider="${selectedEntry!.provider}" display="${selectedEntry!.display_name}"`)
+    useNightCodeStore.getState().addRecentModel({
+      id: selectedEntry!.id,
+      provider: selectedEntry!.provider,
+      display_name: selectedEntry!.display_name,
+    })
     onSubmit?.(trimmed, selectedEntry!.id, attachments.length > 0 ? attachments : undefined, selectedEntry!.provider, skillSlugs)
     setValue("")
     setAttachments([])
@@ -305,44 +320,14 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
         </div>
         <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  disabled={disabled}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                  aria-label="Attach files"
-                >
-                  <Plus size={14} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-44">
-                <DropdownMenuItem
-                  onSelect={() => fileInputRef.current?.click()}
-                >
-                  <Paperclip size={14} className="mr-2" />
-                  <span>Upload files</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    const ta = textareaRef.current
-                    if (ta) {
-                      const before = value.slice(0, ta.selectionStart)
-                      const after = value.slice(ta.selectionStart)
-                      const newVal = before + "@deep " + after
-                      setValue(newVal)
-                      React.startTransition(() => {
-                        const pos = before.length + 6
-                        ta.setSelectionRange(pos, pos)
-                        ta.focus()
-                      })
-                    }
-                  }}
-                >
-                  <Brain size={14} className="mr-2" />
-                  <span>Deep think</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              aria-label="Attach files"
+            >
+              <Paperclip size={14} />
+            </button>
             <input
               ref={fileInputRef}
               type="file"
@@ -372,42 +357,88 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
                   />
                 </div>
                 {(() => {
-                  const filtered = modelGroups
-                    .map((g) => ({
-                      ...g,
-                      models: g.models.filter(
-                        (m) =>
-                          m.display_name.toLowerCase().includes(modelSearch.toLowerCase()) ||
-                          m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
-                          g.label.toLowerCase().includes(modelSearch.toLowerCase()),
-                      ),
-                    }))
-                    .filter((g) => g.models.length > 0)
+                  // Recent models from store
+                  const recentModels = useNightCodeStore.getState().recentModels
+                  const inSearch = modelSearch.length > 0
+
+                  // Build recent section (when not searching)
+                  let recentModelsFiltered: ModelEntry[] = []
+                  if (!inSearch && recentModels.length > 0) {
+                    recentModelsFiltered = recentModels
+                      .filter((rm) => {
+                        for (const g of modelGroups) {
+                          if (g.models.some((m) => m.id === rm.id && m.provider === rm.provider)) return true
+                        }
+                        return false
+                      })
+                      .map((rm) => {
+                        for (const g of modelGroups) {
+                          const found = g.models.find((m) => m.id === rm.id && m.provider === rm.provider)
+                          if (found) return found
+                        }
+                        return { id: rm.id, display_name: rm.display_name, provider: rm.provider, provider_display_name: rm.provider }
+                      })
+                  }
+
+                  // Helper: build a model group section
+                  const renderModelGroup = (label: string, models: ModelEntry[]) => (
+                    <div key={label}>
+                      <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
+                        {label}
+                      </div>
+                      {models.map((model, mi) => (
+                        <button
+                          key={`${label}-${model.id}-${mi}`}
+                          onClick={() => {
+                            setSelectedEntry(model)
+                            setPopoverOpen(false)
+                            setModelSearch("")
+                          }}
+                          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
+                        >
+                          <span className="truncate">{model.display_name}</span>
+                          <span className="flex items-center gap-1.5">
+                            {selectedEntry!.id === model.id && selectedEntry!.provider === model.provider && (
+                              <Check size={14} className="shrink-0 text-primary" />
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+
+                  if (inSearch) {
+                    const filtered = modelGroups
+                      .map((g) => ({
+                        ...g,
+                        models: g.models.filter(
+                          (m) =>
+                            m.display_name.toLowerCase().includes(modelSearch.toLowerCase()) ||
+                            m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
+                            g.label.toLowerCase().includes(modelSearch.toLowerCase()),
+                        ),
+                      }))
+                      .filter((g) => g.models.length > 0)
+                    return (
+                      <div className="max-h-72 overflow-y-auto hide-scrollbar">
+                        {filtered.length === 0 ? (
+                          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                            No models match
+                          </div>
+                        ) : filtered.map((g) => renderModelGroup(g.label, g.models))}
+                      </div>
+                    )
+                  }
+
                   return (
                     <div className="max-h-72 overflow-y-auto hide-scrollbar">
-                      {filtered.length === 0 ? (
-                        <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-                          No models match
-                        </div>
-                      ) : (filtered.map((group) => (
-                        <div key={group.label}>
-                          <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
-                            {group.label}
-                          </div>
-                          {group.models.map((model, mi) => (
-                            <button
-                              key={`${group.label}-${model.id}-${mi}`}
-                              onClick={() => { setSelectedEntry(model); setPopoverOpen(false); setModelSearch("") }}
-                              className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted"
-                            >
-                              <span className="truncate">{model.display_name}</span>
-                              {selectedEntry!.id === model.id && selectedEntry!.provider === model.provider && (
-                                <Check size={14} className="shrink-0 text-primary" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )))}
+                      {recentModelsFiltered.length > 0 && (
+                        <>
+                          {renderModelGroup("Recent", recentModelsFiltered)}
+                          <div className="mx-2 my-1 border-t border-border/50" />
+                        </>
+                      )}
+                      {modelGroups.map((group) => renderModelGroup(group.label, group.models))}
                     </div>
                   )
                 })()}
@@ -436,4 +467,4 @@ export function PromptInput({ onSubmit, disabled, defaultModel, defaultProvider 
       </div>
     </div>
   )
-}
+})

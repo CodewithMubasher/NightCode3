@@ -210,9 +210,13 @@ export class ToolIsolationService {
         return record
       }
 
-      case "execute_command": {
+      case "shell": {
         const asRecord = data as Record<string, unknown>
         const summarized = { ...asRecord }
+        const out = summarized.output
+        if (typeof out === "string" && out.length > MAX_SUMMARY_LENGTH) {
+          summarized.output = out.slice(0, MAX_SUMMARY_LENGTH) + `\n\n...[truncated: ${out.length} total chars]`
+        }
         for (const key of ["stdout", "stderr"]) {
           const val = summarized[key]
           if (typeof val === "string" && val.length > MAX_SUMMARY_LENGTH) {

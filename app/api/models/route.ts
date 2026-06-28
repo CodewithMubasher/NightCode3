@@ -19,11 +19,9 @@ const GROQ_HAS_KEY = () => hasAnyKey("GROQ_API_KEY")
 const GROQ_KEY = () => getNextKey("GROQ_API_KEY")
 const GOOGLE_HAS_KEY = () => hasAnyKey("GOOGLE_GENERATIVE_AI_API_KEY")
 const OPENROUTER_KEY = () => getApiKey("OPENROUTER_API_KEY")
-const OPENCODE_KEY = () => getApiKey("OPENCODE_API_KEY")
 const OLLAMA_KEY = () => getApiKey("OLLAMA_CLOUD_API_KEY")
 const XIAOMI_KEY = () => getApiKey("XIAOMI_API_KEY")
 const CEREBRAS_KEY = () => getApiKey("CEREBRAS_API_KEY")
-const ROUTEWAY_KEY = () => getApiKey("ROUTEWAY_API_KEY")
 const NAGA_KEY = () => getApiKey("NAGA_API_KEY")
 const SAMBANOVA_KEY = () => getApiKey("SAMBANOVA_API_KEY")
 const FREETHEAI_KEY = () => getApiKey("FREETHEAI_API_KEY")
@@ -89,27 +87,6 @@ async function fetchOpenRouterModels() {
   }
 }
 
-async function fetchOpenCodeModels() {
-  try {
-    const res = await fetch("https://opencode.ai/zen/v1/models", {
-      headers: { Authorization: `Bearer ${OPENCODE_KEY()}` },
-    })
-    if (!res.ok) return null
-    const json = await res.json()
-    const models = (json.data || [])
-      .filter((m: any) => m.id)
-      .map((m: any) => ({
-        id: m.id,
-        display_name: m.id === "big-pickle" ? "Big Pickle (OpenCode Free MoE)" : m.id,
-        provider: "opencode" as const,
-        provider_display_name: "OpenCode",
-      }))
-    return models.length > 0 ? models : null
-  } catch {
-    return null
-  }
-}
-
 async function fetchOllamaModels() {
   try {
     const res = await fetch("https://ollama.com/api/tags", {
@@ -146,27 +123,6 @@ async function fetchCerebrasModels() {
         display_name: m.id,
         provider: "cerebras" as const,
         provider_display_name: "Cerebras",
-      }))
-    return models.length > 0 ? models : null
-  } catch {
-    return null
-  }
-}
-
-async function fetchRoutewayModels() {
-  try {
-    const res = await fetch("https://api.routeway.ai/v1/models", {
-      headers: { Authorization: `Bearer ${ROUTEWAY_KEY()}` },
-    })
-    if (!res.ok) return null
-    const json = await res.json()
-    const models = (json.data || [])
-      .filter((m: any) => m.id)
-      .map((m: any) => ({
-        id: m.id,
-        display_name: m.id,
-        provider: "routeway" as const,
-        provider_display_name: "Routeway",
       }))
     return models.length > 0 ? models : null
   } catch {
@@ -327,146 +283,47 @@ export async function GET() {
   return getCached(async () => {
     const groups: { label: string; models: { id: string; display_name: string; provider: string; provider_display_name: string }[] }[] = []
 
-    if (GROQ_HAS_KEY()) {
-    const groqModels = await fetchGroqModels()
-    if (groqModels) {
+    // ── Static groups (no HTTP fetch needed) ──
+    if (GOOGLE_HAS_KEY()) {
+      groups.push({ label: "Google", models: GOOGLE_MODELS })
+    }
+    if (CLOUDFLARE_KEY()) {
+      groups.push({ label: "Cloudflare", models: CLOUDFLARE_MODELS })
+    }
+
+    // ── Fetch all dynamic providers in parallel ──
+    const tasks: Array<{ label: string; fetch: () => Promise<typeof GOOGLE_MODELS | null> }> = []
+
+    if (GROQ_HAS_KEY())       tasks.push({ label: "Groq",       fetch: fetchGroqModels })
+    if (OPENROUTER_KEY())     tasks.push({ label: "OpenRouter", fetch: fetchOpenRouterModels })
+    if (OLLAMA_KEY())         tasks.push({ label: "Ollama Cloud", fetch: fetchOllamaModels })
+    if (XIAOMI_KEY())         tasks.push({ label: "Xiaomi",     fetch: fetchXiaomiModels })
+    if (CEREBRAS_KEY())       tasks.push({ label: "Cerebras",   fetch: fetchCerebrasModels })
+    if (NAGA_KEY())           tasks.push({ label: "Naga",       fetch: fetchNagaModels })
+    if (SAMBANOVA_KEY())      tasks.push({ label: "SambaNova",  fetch: fetchSambaNovaModels })
+    if (FREETHEAI_KEY())      tasks.push({ label: "FreeTheAI",  fetch: fetchFreeTheAIModels })
+    if (NVIDIA_KEY())         tasks.push({ label: "NVIDIA",     fetch: fetchNvidiaModels })
+
+    // Local AI also fetches but with a shorter timeout — include in parallel
+    tasks.push({ label: "Local AI", fetch: fetchLocalModels })
+
+    const results = await Promise.allSettled(tasks.map((t) => t.fetch()))
+
+    for (let i = 0; i < tasks.length; i++) {
+      const r = results[i]
+      if (r.status === "fulfilled" && r.value && r.value.length > 0) {
+        groups.push({ label: tasks[i].label, models: r.value })
+      }
+    }
+
+    if (groups.length === 0) {
       groups.push({
-        label: "Groq",
-        models: groqModels,
+        label: "Demo",
+        models: [
+          { id: "gemini-2.0-flash", display_name: "Gemini 2.0 Flash", provider: "google", provider_display_name: "Google" },
+        ],
       })
     }
-  }
-
-  if (GOOGLE_HAS_KEY()) {
-    groups.push({
-      label: "Google",
-      models: GOOGLE_MODELS,
-    })
-  }
-
-  if (OPENROUTER_KEY()) {
-    const orModels = await fetchOpenRouterModels()
-    if (orModels) {
-      groups.push({
-        label: "OpenRouter",
-        models: orModels,
-      })
-    }
-  }
-
-  if (OPENCODE_KEY()) {
-    const ocModels = await fetchOpenCodeModels()
-    if (ocModels) {
-      groups.push({
-        label: "OpenCode",
-        models: ocModels,
-      })
-    }
-  }
-
-  if (OLLAMA_KEY()) {
-    const olModels = await fetchOllamaModels()
-    if (olModels) {
-      groups.push({
-        label: "Ollama Cloud",
-        models: olModels,
-      })
-    }
-  }
-
-  if (XIAOMI_KEY()) {
-    const xmModels = await fetchXiaomiModels()
-    if (xmModels) {
-      groups.push({
-        label: "Xiaomi",
-        models: xmModels,
-      })
-    }
-  }
-
-  if (CEREBRAS_KEY()) {
-    const cbModels = await fetchCerebrasModels()
-    if (cbModels) {
-      groups.push({
-        label: "Cerebras",
-        models: cbModels,
-      })
-    }
-  }
-
-  if (ROUTEWAY_KEY()) {
-    const rwModels = await fetchRoutewayModels()
-    if (rwModels) {
-      groups.push({
-        label: "Routeway",
-        models: rwModels,
-      })
-    }
-  }
-
-  if (NAGA_KEY()) {
-    const nagaModels = await fetchNagaModels()
-    if (nagaModels) {
-      groups.push({
-        label: "Naga",
-        models: nagaModels,
-      })
-    }
-  }
-
-  if (SAMBANOVA_KEY()) {
-    const snModels = await fetchSambaNovaModels()
-    if (snModels) {
-      groups.push({
-        label: "SambaNova",
-        models: snModels,
-      })
-    }
-  }
-
-  if (CLOUDFLARE_KEY()) {
-    groups.push({
-      label: "Cloudflare",
-      models: CLOUDFLARE_MODELS,
-    })
-  }
-
-  if (FREETHEAI_KEY()) {
-    const faModels = await fetchFreeTheAIModels()
-    if (faModels) {
-      groups.push({
-        label: "FreeTheAI",
-        models: faModels,
-      })
-    }
-  }
-
-  if (NVIDIA_KEY()) {
-    const nvModels = await fetchNvidiaModels()
-    if (nvModels) {
-      groups.push({
-        label: "NVIDIA",
-        models: nvModels,
-      })
-    }
-  }
-
-  const localModels = await fetchLocalModels()
-  if (localModels.length > 0) {
-    groups.push({
-      label: "Local AI",
-      models: localModels,
-    })
-  }
-
-  if (groups.length === 0) {
-    groups.push({
-      label: "Demo",
-      models: [
-        { id: "gemini-2.0-flash", display_name: "Gemini 2.0 Flash", provider: "google", provider_display_name: "Google" },
-      ],
-    })
-  }
 
     return groups
   }).then((groups) => NextResponse.json(groups))

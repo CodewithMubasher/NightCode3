@@ -90,7 +90,8 @@ async function parseOpenAIStream(
     const inlineCalls = extractInlineToolCalls(collectedText)
     collectedToolCalls.push(...inlineCalls)
     if (inlineCalls.length > 0) {
-      collectedText = ""
+      // Strip inline JSON blocks from text but keep preamble (like opencode)
+      collectedText = collectedText.replace(/```json[\s\S]*?```/g, "").trim()
     }
   }
 

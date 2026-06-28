@@ -139,12 +139,8 @@ export async function executeEngineRun(
       const summary = workingMemory.summarize()
       if (summary) {
         currentMessages.push({
-          role: "user",
+          role: "system",
           content: `[WORKING MEMORY — files already read, use this instead of calling read_file again]\n\n${summary}`,
-        })
-        currentMessages.push({
-          role: "assistant",
-          content: "I have the cached file contents. I'll use them directly.",
         })
       }
 
@@ -154,6 +150,7 @@ export async function executeEngineRun(
       const toolsSize = JSON.stringify(availableTools.map((t) => ({ name: t.name, schema: t.schema }))).length
       const estTokens = preCallTokens
       console.log(`[engine] Payload: system=${sysPromptSize} bytes, messages=${msgsSize} bytes (${currentMessages.length} msgs), tools=${toolsSize} bytes, estTokens=${estTokens}`)
+      console.log(`[engine] Step ${stepNumber} messages: ${currentMessages.map((m) => m.role).join(", ")}`)
 
       let step: Awaited<ReturnType<typeof planStep>> | null = null
       try {
@@ -175,7 +172,7 @@ export async function executeEngineRun(
         console.error(`[engine] planStep failed at step ${stepNumber}: ${msg}`)
         emitEvent("error", { message: `LLM call failed: ${msg}. Continuing.` })
         currentMessages.push({
-          role: "user",
+          role: "system",
           content: `[SYSTEM: The previous LLM call failed with: ${msg}. Please respond with a simpler approach, or summarize what was done so far.]`,
         })
         continue
@@ -227,7 +224,7 @@ export async function executeEngineRun(
           const userText = typeof userMsg?.content === "string" ? userMsg.content : "your request"
           console.log(`[engine] Step ${stepNumber} returned empty text — re-prompting (${emptyTextRetries}/2)`)
           currentMessages.push({
-            role: "user",
+            role: "system",
             content: `[SYSTEM: Empty response (attempt ${emptyTextRetries}/2). Original request: "${userText.slice(0, 200)}". If you were creating or editing files, call the tool now. If you need more context, read the relevant files. Do not narrate — execute.]`,
           })
           continue
@@ -243,7 +240,7 @@ export async function executeEngineRun(
           if (reprompt) {
             console.log(`[engine] Exploration re-prompt ${missionTracker["rePrompts"]}/2 — ${missionTracker.depth} facts so far`)
             currentMessages.push({
-              role: "user",
+              role: "system",
               content: reprompt,
             })
             continue
@@ -485,7 +482,9 @@ export async function executeEngineRun(
           verification = { verified: false, discrepancy: `Verification threw: ${err instanceof Error ? err.message : "Unknown error"}` }
         }
 
-        if (verification.verified) {
+        // Match opencode: always include the tool's actual output for the LLM.
+        // Verification notes (if any) are appended as a system note, not as an error replacement.
+        {
           // Invalidate directory listing cache after file mutations
           const fileArg = tc.args.path as string | undefined
           if (fileArg && ["write_file", "create_folder", "delete_file", "edit_file"].includes(tc.toolName)) {
@@ -519,26 +518,48 @@ export async function executeEngineRun(
           emitEvent("tool_end", {
             tool: tc.toolName,
             args: tc.args,
-            status: "verified",
+            status: verification.verified ? "verified" : "error",
             result: result.data,
             evidence: verification.evidence,
+            error: verification.verified ? undefined : `Verification failed: ${verification.discrepancy}`,
             callNumber: toolCallCount,
             toolCallId: tc.generatedId,
           })
 
           const toolResult = toolIsolation
-            ? toolIsolation.completeTool(tc.generatedId, tc.toolName, true, result.data, null, (result as any).executionTime ?? null, verification.evidence)
+            ? toolIsolation.completeTool(tc.generatedId, tc.toolName, verification.verified, result.data, null, (result as any).executionTime ?? null, verification.evidence)
             : boundToolOutput(tc.generatedId, result.data)
 
-          toolResultMessages.push({
+          const outputType = tc.toolName === "shell" && typeof (result.data as Record<string, unknown> | undefined)?.output === "string"
+            ? { type: "text" as const, text: (result.data as Record<string, unknown>).output as string }
+            : { type: "json" as const, value: toolResult }
+
+          // Always include the tool's actual output for the LLM (matching opencode's behavior)
+          const resultMsg: { role: string; content: Array<Record<string, unknown>> } = {
             role: "tool",
             content: [{
               type: "tool-result",
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              output: { type: "json" as const, value: toolResult },
+              output: outputType,
             }],
-          })
+          }
+
+          // If verification failed, also include the output + discrepancy as a system note
+          // so the LLM can see what actually happened (unlike opencode which has no verify layer)
+          if (!verification.verified) {
+            const evidenceOutput = verification.evidence && typeof verification.evidence === "object"
+              ? Object.entries(verification.evidence as Record<string, unknown>)
+                  .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+                  .join("\n")
+              : ""
+            resultMsg.content.push({
+              type: "text",
+              text: `[Verification note: ${verification.discrepancy}${evidenceOutput ? `\n${evidenceOutput}` : ""}]`,
+            })
+          }
+
+          toolResultMessages.push(resultMsg)
 
           if (currentMode === "plan") {
             const path = tc.args.path as string | undefined
@@ -565,27 +586,9 @@ export async function executeEngineRun(
           }
 
           roundTotal++
-        } else {
-          roundFailed++
-          roundTotal++
-          emitEvent("tool_end", {
-            tool: tc.toolName,
-            args: tc.args,
-            status: "error",
-            error: `Verification failed: ${verification.discrepancy}`,
-            callNumber: toolCallCount,
-            toolCallId: tc.generatedId,
-          })
-          toolIsolation?.completeTool(tc.generatedId, tc.toolName, false, null, `Verification failed: ${verification.discrepancy}`, null, undefined)
-          toolResultMessages.push({
-            role: "tool",
-            content: [{
-              type: "tool-result",
-              toolCallId: tc.toolCallId,
-              toolName: tc.toolName,
-              output: { type: "json" as const, value: { error: `Verification failed: ${verification.discrepancy}` } },
-            }],
-          })
+          if (!verification.verified) {
+            roundFailed++
+          }
         }
       }
 
@@ -601,7 +604,7 @@ export async function executeEngineRun(
           if (!hasSubstance) {
             const reminder = `[SYSTEM: Your plan_summary was too brief (${planSummary.length} chars) to switch to BUILD mode. Investigate further — read the project manifest, explore the directory structure, and trace the relevant code. Call plan_exit again with a detailed summary.]`
             toolResultMessages.push({
-              role: "user",
+              role: "system",
               content: [{ type: "text", text: reminder }],
             })
             console.log(`[engine] Plan verification FAILED — summary too brief. Staying in PLAN mode.`)
@@ -616,7 +619,7 @@ export async function executeEngineRun(
               .filter(Boolean) as ToolImplementation[]
             const switchNote = `[SYSTEM: Mode switched from PLAN to BUILD. Here is the planning summary:\n\n${planSummary}\n\nYou now have full write/edit access. Continue with the implementation based on the investigation above.]`
             toolResultMessages.push({
-              role: "user",
+              role: "system",
               content: [{ type: "text", text: switchNote }],
             })
             console.log(`[engine] Mode switched: plan → build`)
@@ -706,8 +709,8 @@ export async function executeEngineRun(
           // Add assistant text + system note into messages for full context
           const assistantMsg: { role: string; content: unknown } = { role: "assistant", content: assistantContent }
           currentMessages = [...currentMessages, assistantMsg, {
-            role: "user",
-            content: [{ type: "text", text: `[SYSTEM: All tools are now available including ${capMatch[1]} capabilities. Continue your task.]` }],
+            role: "system",
+            content: `[SYSTEM: All tools are now available including ${capMatch[1]} capabilities. Continue your task.]`,
           }]
           stepMessages.set(stepNumber, [assistantMsg])
           continue
@@ -737,6 +740,8 @@ export async function executeEngineRun(
         assistantMsg,
         ...toolResultMessages,
       ]
+
+      console.log(`[engine] Step ${stepNumber} messages: ${currentMessages.map((m) => m.role).join(", ")}`)
 
       const cleared = clearOldToolOutputs(currentMessages, 2, currentMode)
       if (cleared > 0) {

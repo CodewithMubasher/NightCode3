@@ -2,7 +2,7 @@ import type { ToolImplementation } from "./index"
 
 const SUB_AGENT_TOOLS = [
   "read_file", "write_file", "list_directory", "delete_file", "create_folder",
-  "search_files", "execute_command",
+  "search_files", "shell",
   "create_artifact", "list_artifacts", "read_artifact", "edit_artifact",
   "search_memories",
 ]
@@ -31,8 +31,8 @@ Examples:
     const rawFiles = args.files as string | string[] ?? []
     const focus = (args.focus as string) ?? "general"
     const depth = (args.__depth as number ?? 0) + 1
-    const provider = (args.__provider as string) ?? "opencode"
-    const model = (args.__model as string) ?? "big-pickle"
+    const provider = (args.__provider as string) ?? "google"
+    const model = (args.__model as string) ?? "gemini-2.5-flash"
 
     if (depth >= 2) {
       return {

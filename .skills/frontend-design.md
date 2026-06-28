@@ -1,4 +1,5 @@
 # Frontend Design Standards
+<!-- tags: design, code -->
 
 You MUST follow these rules when building user interfaces or frontend code:
 

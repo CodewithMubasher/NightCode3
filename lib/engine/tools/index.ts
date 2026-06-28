@@ -5,7 +5,7 @@ import { listDirectoryTool } from "./list-directory"
 import { deleteFileTool } from "./delete-file"
 import { createFolderTool } from "./create-folder"
 import { searchFilesTool } from "./search-files"
-import { executeCommandTool } from "./execute-command"
+import { shellTool } from "./shell"
 import { createArtifactTool } from "./create-artifact"
 import { askTool } from "./ask"
 import { listArtifactsTool, readArtifactTool, editArtifactTool } from "./artifact-tools"
@@ -49,7 +49,7 @@ export const TOOL_REGISTRY: Record<string, ToolImplementation> = {
   delete_file: deleteFileTool,
   create_folder: createFolderTool,
   search_files: searchFilesTool,
-  execute_command: executeCommandTool,
+  shell: shellTool,
   delegate_task: delegateTaskTool,
   create_artifact: createArtifactTool,
   ask: askTool,

@@ -269,7 +269,6 @@ function ModelsTab() {
       <Separator className="mb-2" />
       <SettingRow label="Default Model" description="Model used for new chats">
         <select className="h-8 w-44 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
-          <option>big-pickle (OpenCode)</option>
           <option>gpt-4o (OpenAI)</option>
           <option>claude-3.5-sonnet (OpenRouter)</option>
           <option>gemini-2.5-flash (Google)</option>
@@ -279,7 +278,6 @@ function ModelsTab() {
       <Separator />
       <SettingRow label="Default Provider" description="Provider for new chats">
         <select className="h-8 w-44 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
-          <option>opencode</option>
           <option>openai</option>
           <option>openrouter</option>
           <option>google</option>

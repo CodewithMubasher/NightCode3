@@ -2,7 +2,7 @@ import { searchFilesTool } from "./tools/search-files"
 import { readFileTool } from "./tools/read-file"
 import { writeFileTool } from "./tools/write-file"
 import { editFileTool } from "./tools/edit-file"
-import { executeCommandTool } from "./tools/execute-command"
+import { shellTool } from "./tools/shell"
 import { listDirectoryTool } from "./tools/list-directory"
 import type { ToolResult } from "./tools"
 
@@ -64,8 +64,8 @@ export class WorkspaceSDK {
   }
 
   executeCommand(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return this.run<{ stdout: string; stderr: string; exitCode: number }>("execute_command", { command }, () =>
-      executeCommandTool.execute({ command })
+    return this.run<{ stdout: string; stderr: string; exitCode: number }>("shell", { command }, () =>
+      shellTool.execute({ command })
     )
   }
 

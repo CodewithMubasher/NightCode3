@@ -1,19 +1,34 @@
+"use client"
+
+import * as React from "react"
 import { Code, FilePen, GraduationCap, Mail, Palette } from "lucide-react"
+import type { SkillInfo } from "@/types"
 
 const SUGGESTIONS = [
-  { icon: Code, label: "Code", prompt: "Write code to" },
-  { icon: FilePen, label: "Write", prompt: "Write a document about" },
-  { icon: GraduationCap, label: "Learn", prompt: "Explain how" },
-  { icon: Mail, label: "Mail", prompt: "Send an email to" },
-  { icon: Palette, label: "Design", prompt: "Design a UI for" },
+  { icon: Code, label: "Code", tag: "code" },
+  { icon: FilePen, label: "Write", tag: "write" },
+  { icon: GraduationCap, label: "Learn", tag: "learn" },
+  { icon: Mail, label: "Mail", tag: "mail" },
+  { icon: Palette, label: "Design", tag: "design" },
 ]
 
 interface SuggestionPillsProps {
-  onSelect?: (prompt: string) => void
+  onSelectSkill?: (slug: string) => void
   disabled?: boolean
 }
 
-export function SuggestionPills({ onSelect, disabled }: SuggestionPillsProps) {
+export function SuggestionPills({ onSelectSkill, disabled }: SuggestionPillsProps) {
+  const [skills, setSkills] = React.useState<SkillInfo[]>([])
+
+  React.useEffect(() => {
+    fetch("/api/skills").then((r) => r.json()).then((data: SkillInfo[]) => setSkills(data)).catch(() => {})
+  }, [])
+
+  function handlePillClick(tag: string) {
+    const match = skills.find((s) => s.tags?.includes(tag))
+    if (match) onSelectSkill?.(match.slug)
+  }
+
   return (
     <>
       <style>{`
@@ -23,10 +38,10 @@ export function SuggestionPills({ onSelect, disabled }: SuggestionPillsProps) {
         }
       `}</style>
       <div className="hidden sm:flex items-center justify-center gap-2">
-        {SUGGESTIONS.map(({ icon: Icon, label, prompt }, i) => (
+        {SUGGESTIONS.map(({ icon: Icon, label, tag }, i) => (
           <button
             key={label}
-            onClick={() => onSelect?.(prompt)}
+            onClick={() => handlePillClick(tag)}
             disabled={disabled}
             style={{
               animation: `pill-in 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) ${i * 0.06}s both`,

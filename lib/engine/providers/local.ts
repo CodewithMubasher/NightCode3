@@ -78,6 +78,9 @@ async function parseLocalSSE(
   let buffer = ""
   let collectedText = ""
   let sessionId: string | undefined
+  // Track whether we're inside a ```json code block to suppress it from onText
+  let insideJsonBlock = false
+  let jsonBlockBuffer = ""
 
   while (true) {
     const { done, value } = await reader.read()
@@ -98,8 +101,35 @@ async function parseLocalSSE(
         const type = json.type
 
         if (type === "text" && json.delta) {
-          callbacks.onText?.(json.delta)
-          collectedText += json.delta
+          const delta = json.delta as string
+
+          // Track ```json code blocks — suppress them from onText
+          if (!insideJsonBlock && delta.includes("```json")) {
+            const idx = delta.indexOf("```json")
+            const before = delta.slice(0, idx)
+            if (before) {
+              callbacks.onText?.(before)
+              collectedText += before
+            }
+            insideJsonBlock = true
+            jsonBlockBuffer = delta.slice(idx)
+            continue
+          }
+
+          if (insideJsonBlock) {
+            jsonBlockBuffer += delta
+            if (jsonBlockBuffer.includes("```") && jsonBlockBuffer.lastIndexOf("```") > 6) {
+              const closeIdx = jsonBlockBuffer.indexOf("```", 7)
+              if (closeIdx >= 0) {
+                insideJsonBlock = false
+                jsonBlockBuffer = ""
+              }
+            }
+            continue
+          }
+
+          callbacks.onText?.(delta)
+          collectedText += delta
         } else if (type === "thought" && json.delta) {
           callbacks.onReasoning?.(json.delta)
         } else if (type === "image" && json.url) {
@@ -118,7 +148,7 @@ async function parseLocalSSE(
   return { text: collectedText, toolCalls: [], sessionId }
 }
 
-let sessionCounter = 0
+let activeSessionId: string | null = null
 
 export async function streamLocal(
   messages: Array<{ role: string; content: unknown }>,
@@ -136,18 +166,19 @@ export async function streamLocal(
   const requestText = JSON.stringify({ messages: localMessages, model })
   const estimatedInputTokens = Math.max(1, Math.round(requestText.length / 4))
 
-  // Build a purpose-specific prompt for local models.
-  // The engine's systemPrompt contains "You are NightCode" and
-  // aggressive persona instructions that trigger Gemini's
-  // anti-injection detection. We use our own cooperative framing.
-  const effectiveSystemPrompt = buildLocalSystemPrompt(tools)
-
   const body: Record<string, unknown> = {
-    messages: localMessages,
     stream: true,
-    session_id: `nc_local_${sessionCounter}`,
     model,
-    system_prompt: effectiveSystemPrompt,
+  }
+
+  if (activeSessionId) {
+    // Multi-turn: reuse existing ChatSession, only send the new user message
+    body.messages = localMessages.filter((m) => m.role === "user").slice(-1)
+    body.session_id = activeSessionId
+  } else {
+    // First turn: send full history with system prompt to bootstrap
+    body.messages = localMessages
+    body.system_prompt = buildLocalSystemPrompt(tools)
   }
 
   const res = await fetch(url, {
@@ -169,13 +200,15 @@ export async function streamLocal(
     if (!reader) throw new Error("No response body for SSE stream")
 
     const { text, sessionId } = await parseLocalSSE(reader, signal ?? new AbortController().signal, callbacks)
-    if (sessionId) sessionCounter++
+    if (sessionId) activeSessionId = sessionId
 
+    // Extract inline tool calls but keep preamble text (like opencode does)
     const toolCalls = extractInlineToolCalls(text)
-    const cleanText = toolCalls.length > 0 ? "" : text
-    const estimatedOutputTokens = Math.max(1, Math.round(cleanText.length / 4))
+    // Preserve text before inline JSON blocks — this is the assistant's preamble
+    const preambleText = text.replace(/```json[\s\S]*?```/g, "").trim()
+    const estimatedOutputTokens = Math.max(1, Math.round(preambleText.length / 4))
 
-    return { text: cleanText, reasoning: "", toolCalls, usage: { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens } }
+    return { text: preambleText, reasoning: "", toolCalls, usage: { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens } }
   }
 
   const json = await res.json()
@@ -190,9 +223,9 @@ export async function streamLocal(
   }
 
   const toolCalls = extractInlineToolCalls(text)
-  const cleanText = toolCalls.length > 0 ? "" : text
-  callbacks.onText?.(cleanText)
-  const estimatedOutputTokens = Math.max(1, Math.round(cleanText.length / 4))
+  const preambleText = text.replace(/```json[\s\S]*?```/g, "").trim()
+  if (preambleText) callbacks.onText?.(preambleText)
+  const estimatedOutputTokens = Math.max(1, Math.round(preambleText.length / 4))
 
-  return { text: cleanText, reasoning: "", toolCalls, usage: { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens } }
+  return { text: preambleText, reasoning: "", toolCalls, usage: { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens } }
 }

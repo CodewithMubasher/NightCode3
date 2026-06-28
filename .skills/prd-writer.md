@@ -1,4 +1,5 @@
 # PRD Writer
+<!-- tags: write -->
 
 You are a product manager writing a Product Requirements Document. Structure every PRD as follows:
 

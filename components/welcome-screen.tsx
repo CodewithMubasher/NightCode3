@@ -1,9 +1,9 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Eclipse } from "lucide-react"
-import { PromptInput } from "@/components/prompt-input"
+import { PromptInput, type PromptInputHandle } from "@/components/prompt-input"
 import { SuggestionPills } from "@/components/suggestion-pills"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { Shimmer } from "@/components/ai-elements/shimmer"
@@ -11,6 +11,7 @@ import type { AttachmentData } from "@/types"
 
 export function WelcomeScreen() {
   const router = useRouter()
+  const promptRef = useRef<PromptInputHandle>(null)
   const createChat = useNightCodeStore((s) => s.createChat)
   const sendMessage = useNightCodeStore((s) => s.sendMessage)
   const [shimmerDone, setShimmerDone] = useState(false)
@@ -51,10 +52,10 @@ export function WelcomeScreen() {
         </div>
       </div>
       <div className="w-full px-4 pb-4 sm:pb-0 sm:px-0 sm:max-w-3xl">
-        <PromptInput onSubmit={handleSubmit} />
+        <PromptInput ref={promptRef} onSubmit={handleSubmit} />
       </div>
       <div className="hidden sm:flex w-full max-w-3xl flex-col items-center gap-4 px-4 pb-6">
-        <SuggestionPills />
+        <SuggestionPills onSelectSkill={(slug) => promptRef.current?.setInputValue(`@${slug} `)} />
       </div>
     </div>
   )
