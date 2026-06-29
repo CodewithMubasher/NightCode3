@@ -1,5 +1,7 @@
 import "@fontsource-variable/geist/wght.css"
 import "@fontsource-variable/geist-mono/wght.css"
+import "streamdown/styles.css"
+import "katex/dist/katex.min.css"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SettingsApplier } from "@/components/settings-applier"

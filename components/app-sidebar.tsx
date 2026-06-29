@@ -282,24 +282,11 @@ export function AppSidebar() {
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem>
-                  <User size={14} />
-                  <span>Profile</span>
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
                   <Settings size={14} />
                   <span>Settings</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <CreditCard size={14} />
-                  <span>Billing</span>
-                </DropdownMenuItem>
               </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <LogOut size={14} />
-                <span>Log out</span>
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

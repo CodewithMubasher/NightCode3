@@ -241,3 +241,52 @@
   scroll-behavior: auto !important;
 }
 
+.nc-prose {
+  color: #e3e3e3 !important;
+  font-size: 16px !important;
+  line-height: 1.85 !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.01em !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+
+.nc-prose p,
+.nc-prose li {
+  color: #e3e3e3 !important;
+  font-size: 16px !important;
+  line-height: 1.85 !important;
+}
+
+.nc-prose strong {
+  color: #f0f0f0 !important;
+  font-weight: 600 !important;
+}
+
+/* Headings — Gemini makes them feel natural, not loud */
+.nc-prose h1 { font-size: 1.4em !important; font-weight: 700 !important; }
+.nc-prose h2 { font-size: 1.2em !important; font-weight: 700 !important; }
+.nc-prose h3 { font-size: 1.05em !important; font-weight: 600 !important; }
+
+/* Math — match body size exactly */
+.nc-prose .katex {
+  font-size: 1.05em !important;
+  color: #e3e3e3 !important;
+}
+.nc-prose .katex-display {
+  margin: 0.5em 0 !important;
+}
+
+/* Tighten consecutive display math blocks */
+.nc-prose .katex-display {
+  margin: 0.3em 0 !important;
+  text-align: left !important;
+}
+.nc-prose .katex-display + .katex-display {
+  margin-top: 0.1em !important;
+}
+.nc-prose .katex-display > .katex {
+  text-align: left !important;
+  padding-left: 1em;
+}
+

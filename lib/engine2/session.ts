@@ -381,7 +381,7 @@ export class Session {
             content.push({ type: "image", image: part.image, mimeType: part.mimeType })
             break
           case "reasoning":
-            // Reasoning parts are typically not sent to the LLM
+            content.push({ type: "text", text: part.text })
             break
           case "tool-call":
             content.push({

@@ -39,3 +39,4 @@ next-env.d.ts
 workspace/
 opencode/
 project/
+mcp-servers.json

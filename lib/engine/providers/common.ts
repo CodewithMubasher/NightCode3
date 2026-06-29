@@ -16,6 +16,8 @@ export interface UsageInfo {
 export interface GatewayCallbacks {
   onText?: (text: string) => void
   onReasoning?: (text: string) => void
+  onToolCallStart?: (toolCallId: string, name: string) => void
+  onToolCallDelta?: (toolCallId: string, text: string) => void
 }
 
 export interface StreamResult {
@@ -49,24 +51,55 @@ export function getTemperature(modelId: string): number | undefined {
  */
 export function schemaValueToJsonSchema(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && "_def" in value) {
-    // Zod schema — extract type from Zod's internal representation
     const def = (value as any)._def
-    const typeName = def?.typeName
-    switch (typeName) {
-      case "ZodString": return { type: "string" }
-      case "ZodNumber": return { type: "number" }
-      case "ZodBoolean": return { type: "boolean" }
-      case "ZodArray": return { type: "array", items: schemaValueToJsonSchema(def.type) }
-      case "ZodEnum": {
-        const values: string[] | undefined = def.values
-        return { type: "string", enum: values }
+    const type = def?.type as string | undefined
+
+    // This project uses a custom Zod implementation where _def.type is a lowercase
+    // string (e.g. "string", "array", "object") instead of standard Zod's _def.typeName
+    // (e.g. "ZodString", "ZodArray", "ZodObject").
+    switch (type) {
+      case "string": return { type: "string" }
+      case "number": return { type: "number" }
+      case "boolean": return { type: "boolean" }
+      case "array":
+        return { type: "array", items: schemaValueToJsonSchema(def.element) }
+      case "object": {
+        const shape = def.shape ?? {}
+        const properties: Record<string, unknown> = {}
+        const required: string[] = []
+        for (const [key, val] of Object.entries(shape)) {
+          properties[key] = schemaValueToJsonSchema(val)
+          if ((val as any)?._def?.type !== "optional" && (val as any)?._def?.type !== "nullable" && (val as any)?._def?.type !== "default") {
+            required.push(key)
+          }
+        }
+        return {
+          type: "object",
+          properties,
+          ...(required.length > 0 ? { required } : {}),
+          additionalProperties: false,
+        }
       }
-      case "ZodOptional":
+      case "enum": {
+        const entries = def.entries as Record<string, string> | undefined
+        return { type: "string", enum: entries ? Object.values(entries) : undefined }
+      }
+      case "optional":
         return { ...schemaValueToJsonSchema(def.innerType), optional: true }
-      case "ZodNullable":
+      case "nullable":
         return { ...schemaValueToJsonSchema(def.innerType), nullable: true }
-      case "ZodDefault":
+      case "default":
         return schemaValueToJsonSchema(def.innerType)
+      case "union":
+        return {
+          anyOf: (def.options as any[]).map((opt: any) => {
+            // def.options might be an array of { _def: { type: "string" } } objects
+            // or plain type strings like "string", "number"
+            return typeof opt === "object" && opt !== null && "_def" in opt
+              ? schemaValueToJsonSchema(opt)
+              : { type: String(opt) }
+          }),
+        }
       default:
         return { type: "string" }
     }
@@ -108,7 +141,7 @@ export function buildToolsArray(tools: ToolDef[]): unknown[] {
       const isOptional =
         (typeof value === "string" && value.endsWith("?")) ||
         (value && typeof value === "object" && "_def" in value &&
-          ((value as any)._def?.typeName === "ZodOptional" || (value as any)._def?.typeName === "ZodNullable" || (value as any)._def?.typeName === "ZodDefault"))
+          ((value as any)._def?.type === "optional" || (value as any)._def?.type === "nullable" || (value as any)._def?.type === "default"))
 
       if (!isOptional) {
         required.push(key)
@@ -217,6 +250,7 @@ export function formatOpenAIMessages(
         } else {
           content = JSON.stringify(output)
         }
+        console.log(`[format] tool result: id=${p.toolCallId} name=${p.toolName} contentLen=${content.length}`)
         out.push({
           role: "tool",
           tool_call_id: (p.toolCallId as string) ?? `call_${Date.now()}`,
@@ -235,9 +269,13 @@ export function formatOpenAIMessages(
       const toolCallParts = parts.filter((p) => p.type === "tool-call") as Array<{ type: string; toolCallId?: string; toolName?: string; input?: unknown }>
 
       const textContent = textParts.map((p) => p.text ?? "").join("").trim()
-      const assistantMsg: { role: string; content: string | null; tool_calls?: Array<Record<string, unknown>> } = {
+      if (!textContent && toolCallParts.length === 0) {
+        out.push({ role: "assistant", content: "" })
+        continue
+      }
+      const assistantMsg: { role: string; content: string; tool_calls?: Array<Record<string, unknown>> } = {
         role: "assistant",
-        content: textContent || null,
+        content: textContent || "",
       }
       if (toolCallParts.length > 0) {
         assistantMsg.tool_calls = toolCallParts.map((p) => ({
@@ -248,6 +286,7 @@ export function formatOpenAIMessages(
             arguments: p.input ? JSON.stringify(p.input) : "{}",
           },
         }))
+        console.log(`[format] assistant with ${toolCallParts.length} tool-call(s): ${toolCallParts.map(p => `${p.toolName}[${p.toolCallId}]`).join(', ')}`)
       }
       out.push(assistantMsg)
       continue

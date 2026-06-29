@@ -49,6 +49,10 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
       let hasReasoning = false
       let hasText = false
 
+      // Track tool calls that were stream-started for real-time feedback
+      const streamStartedProviderIds = new Set<string>()
+      const providerToolInfo = new Map<string, { adapterId: string; name: string }>()
+
       const callbacks = {
         onText: (text: string) => {
           if (!hasText) {
@@ -64,10 +68,24 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
           }
           emit({ type: "reasoning-delta", id: reasoningBlockId, text })
         },
+        onToolCallStart: (providerId: string, name: string) => {
+          const adapterId = createToolCallId()
+          providerToolInfo.set(providerId, { adapterId, name })
+          streamStartedProviderIds.add(providerId)
+          emit({ type: "tool-input-start", id: adapterId, name })
+        },
+        onToolCallDelta: (providerId: string, text: string) => {
+          const info = providerToolInfo.get(providerId)
+          if (info) {
+            emit({ type: "tool-input-delta", id: info.adapterId, text, name: info.name })
+          }
+        },
       }
 
       try {
         const result = await providerStream(messages, system, tools, callbacks, signal)
+
+        console.log(`[adapter] stream result: text=${result.text.length}ch reasoning=${result.reasoning.length}ch tools=${result.toolCalls.length} finish=${result.finishReason}`)
 
         if (hasText) {
           emit({ type: "text-end", id: textBlockId })
@@ -77,39 +95,51 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
         }
 
         // Emit tool call events
-        if (result.toolCalls.length > 0) {
-          console.log(`[adapter] Tool calls from provider:`, result.toolCalls.map(tc => ({
-            name: tc.toolName,
-            argsType: typeof tc.args,
-            argsNull: tc.args === null,
-            argsKeys: tc.args ? Object.keys(tc.args) : [],
-          })))
-        }
         for (const tc of result.toolCalls) {
-          const callId = createToolCallId()
           const safeArgs = tc.args ?? {}
-          emit({
-            type: "tool-input-start",
-            id: callId,
-            name: tc.toolName,
-          })
-          emit({
-            type: "tool-input-delta",
-            id: callId,
-            name: tc.toolName,
-            text: JSON.stringify(safeArgs),
-          })
-          emit({
-            type: "tool-input-end",
-            id: callId,
-            name: tc.toolName,
-          })
-          emit({
-            type: "tool-call",
-            id: callId,
-            name: tc.toolName,
-            input: safeArgs,
-          })
+          if (streamStartedProviderIds.has(tc.toolCallId)) {
+            // Provider already emitted start/delta during streaming — just finalize
+            const info = providerToolInfo.get(tc.toolCallId)
+            const callId = info?.adapterId ?? createToolCallId()
+            console.log(`[adapter] emit tool-call (streamed): providerId=${tc.toolCallId} adapterId=${callId} name=${tc.toolName}`)
+            emit({
+              type: "tool-input-end",
+              id: callId,
+              name: tc.toolName,
+            })
+            emit({
+              type: "tool-call",
+              id: callId,
+              name: tc.toolName,
+              input: safeArgs,
+            })
+          } else {
+            // Fallback: provider didn't support intermediate callbacks — emit all four
+            const callId = createToolCallId()
+            console.log(`[adapter] emit tool-call (batch): providerId=${tc.toolCallId} newId=${callId} name=${tc.toolName} argsKeys=${Object.keys(safeArgs).join(",")}`)
+            emit({
+              type: "tool-input-start",
+              id: callId,
+              name: tc.toolName,
+            })
+            emit({
+              type: "tool-input-delta",
+              id: callId,
+              name: tc.toolName,
+              text: JSON.stringify(safeArgs),
+            })
+            emit({
+              type: "tool-input-end",
+              id: callId,
+              name: tc.toolName,
+            })
+            emit({
+              type: "tool-call",
+              id: callId,
+              name: tc.toolName,
+              input: safeArgs,
+            })
+          }
         }
 
         // Emit step-finish + finish

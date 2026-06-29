@@ -16,6 +16,8 @@ export interface StreamRequest {
   systemPrompt?: string
   onText?: (text: string) => void
   onReasoning?: (text: string) => void
+  onToolCallStart?: (toolCallId: string, name: string) => void
+  onToolCallDelta?: (toolCallId: string, text: string) => void
   signal?: AbortSignal
 }
 
@@ -28,12 +30,13 @@ export class ProviderManager {
   }
 
   async stream(request: StreamRequest): Promise<RetryResult<StreamResult>> {
-    const { provider, model, messages, tools, systemPrompt, onText, onReasoning, signal } = request
+    const { provider, model, messages, tools, systemPrompt, onText, onReasoning, onToolCallStart, onToolCallDelta, signal } = request
 
     const result = await withRetry(
       async (key: KeyHealth, retrySignal: AbortSignal) => {
         const headers = this.buildHeaders(key)
         const url = getBaseUrl(provider, model, key.slot.value)
+        const gatewayCallbacks = { onText, onReasoning, onToolCallStart, onToolCallDelta }
 
         let streamResult: StreamResult
 
@@ -44,7 +47,7 @@ export class ProviderManager {
             schema: t.schema as Record<string, string | any>,
           }))
           streamResult = await streamLocal(
-            messages, model, { onText, onReasoning }, headers, url,
+            messages, model, gatewayCallbacks, headers, url,
             undefined, rawTools, retrySignal,
           )
         } else if (provider === "google") {
@@ -55,7 +58,7 @@ export class ProviderManager {
           }))
           streamResult = await streamGoogle(
             messages, model, rawTools, systemPrompt,
-            { onText, onReasoning }, headers, key.slot, retrySignal,
+            gatewayCallbacks, headers, key.slot, retrySignal,
           )
         } else if (OPENAI_COMPATIBLE.has(provider)) {
           const rawTools = tools?.map((t) => ({
@@ -65,11 +68,11 @@ export class ProviderManager {
           }))
           streamResult = await streamOpenAI(
             messages, model, systemPrompt, rawTools,
-            { onText, onReasoning }, headers, url, retrySignal,
+            gatewayCallbacks, headers, url, retrySignal,
           )
         } else if (provider === "ollama") {
           streamResult = await streamOllama(
-            messages, model, { onText, onReasoning }, headers, url, retrySignal,
+            messages, model, gatewayCallbacks, headers, url, retrySignal,
           )
         } else {
           throw new Error(`Unknown provider: ${provider}`)

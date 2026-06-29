@@ -76,6 +76,10 @@ export function messagesToSessionMessages(msgs: Message[]): SessionMessage[] {
       }
     }
 
+    if (parts.length === 0) {
+      parts.push({ type: "text", id: generateId(), text: "" })
+    }
+
     const role = msg.role === "system" ? "system"
       : msg.role === "assistant" ? "assistant"
       : "user"
@@ -127,6 +131,8 @@ export function createProviderStreamFn(
       systemPrompt: system,
       onText: callbacks?.onText,
       onReasoning: callbacks?.onReasoning,
+      onToolCallStart: callbacks?.onToolCallStart,
+      onToolCallDelta: callbacks?.onToolCallDelta,
       signal,
     })
 

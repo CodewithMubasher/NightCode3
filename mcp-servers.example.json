@@ -1,0 +1,11 @@
+[
+  {
+    "name": "example-server",
+    "type": "local",
+    "command": "node server.js",
+    "args": [],
+    "url": "",
+    "environment": {},
+    "enabled": false
+  }
+]

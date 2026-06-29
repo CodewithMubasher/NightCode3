@@ -31,6 +31,7 @@ interface NightCodeState {
   dismissConfirmation: () => void
   settings: AppSettings
   recentModels: Array<{ id: string; provider: string; display_name: string }>
+  activeSkills: string[]
   previewFilePath: string | null
   isPreviewOpen: boolean
   openPreview: (path: string) => void
@@ -77,6 +78,7 @@ interface NightCodeState {
   submitAskAnswers: (chatId: string, answers: Record<string, unknown>) => Promise<void>
 
   setSettings: (settings: Partial<AppSettings>) => void
+  toggleActiveSkill: (slug: string) => void
   addRecentModel: (model: { id: string; provider: string; display_name: string }) => void
   clearAll: () => void
 }
@@ -97,6 +99,7 @@ export const useNightCodeStore = create<NightCodeState>()(
       askData: null,
       pendingConfirmation: null,
       recentModels: [],
+      activeSkills: [],
       settings: {
         theme: "dark",
         primaryColor: "#D97757",
@@ -493,10 +496,14 @@ export const useNightCodeStore = create<NightCodeState>()(
         console.log('User message:', content)
         console.log('Skills:', skills)
 
+        const allSlugs = new Set([
+          ...(skills ?? []),
+          ...get().activeSkills,
+        ])
         const skillStates: ToolState[] = []
         let skillInjected = ""
-        if (skills && skills.length > 0) {
-          for (const slug of skills) {
+        if (allSlugs.size > 0) {
+          for (const slug of allSlugs) {
             try {
               const res = await fetch(`/api/skills/${slug}`)
               if (res.ok) {
@@ -648,6 +655,8 @@ export const useNightCodeStore = create<NightCodeState>()(
                   timestamp?: number
                 }
 
+                console.log(`[SSE] EVENT type=${parsed.type} chatId=${chatId} msgId=${assistantMessage.id}`)
+
                 switch (parsed.type) {
                   case "text_delta": {
                     const text = (parsed.payload?.text as string) ?? ""
@@ -687,7 +696,7 @@ export const useNightCodeStore = create<NightCodeState>()(
                       status: "running",
                       timestamp: parsed.timestamp ?? Date.now(),
                     }
-                    console.log(`[SSE] tool_start: ${tool} #${toolCallId}`)
+                    console.log(`[SSE] tool_start: ${tool} #${toolCallId} argsKeys=${Object.keys(args).join(",")}`)
                     get().updateToolState(chatId, assistantMessage.id, ts)
 
                     // ── Image generation: add shimmer placeholder immediately ──
@@ -733,7 +742,8 @@ export const useNightCodeStore = create<NightCodeState>()(
                         existing = candidates[0]
                       }
                     }
-                    console.log(`[SSE] tool_end: ${existing?.tool ?? parsed.payload?.tool} #${toolCallId} status=${parsed.payload?.status}`)
+                    const rawStatus = parsed.payload?.status as string | undefined
+                    console.log(`[SSE] tool_end: ${existing?.tool ?? parsed.payload?.tool} #${toolCallId} status=${rawStatus} foundExisting=${!!existing}`)
 
                     // ── Image generation: resolve or fail the placeholder ──
                     const toolName = existing?.tool ?? (parsed.payload?.tool as string)
@@ -827,12 +837,25 @@ export const useNightCodeStore = create<NightCodeState>()(
                     const payload = parsed.payload as Record<string, unknown> | undefined
                     if (payload?.questions) {
                       get().setAskData({ questions: payload.questions as AskData["questions"] })
-                      // Don't overwrite text if the LLM already provided content
-                      const existingMsg = get().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === assistantMessage.id)
-                      if (!existingMsg?.content?.trim()) {
-                        get().updateMessageContent(chatId, assistantMessage.id, "Let me ask a few questions to tailor the response...")
-                      }
                       get().updateMessageStatus(chatId, assistantMessage.id, "complete")
+
+                      // Store result in tool state so bridge.ts creates a tool-result part
+                      // in the next request. Without it the LLM sees a dangling tool-call
+                      // with no matching tool-result and calls ask again (infinite loop).
+                      const toolStates = get().chats
+                        .find((c) => c.id === chatId)
+                        ?.messages.find((m) => m.id === assistantMessage.id)
+                        ?.toolStates
+                      const askTool = toolStates
+                        ? Object.values(toolStates).find((ts) => ts.tool === "ask")
+                        : undefined
+                      if (askTool) {
+                        get().updateToolState(chatId, assistantMessage.id, {
+                          ...askTool,
+                          status: "verified",
+                          result: { questions: payload.questions },
+                        })
+                      }
                     }
                     break
                   }
@@ -934,6 +957,13 @@ export const useNightCodeStore = create<NightCodeState>()(
             (m) => !(m.id === model.id && m.provider === model.provider),
           )
           return { recentModels: [model, ...filtered].slice(0, 8) }
+        }),
+      toggleActiveSkill: (slug) =>
+        set((s) => {
+          const next = s.activeSkills.includes(slug)
+            ? s.activeSkills.filter((x) => x !== slug)
+            : [...s.activeSkills, slug]
+          return { activeSkills: next }
         }),
       setAskData: (data) => set({ askData: data }),
       setPendingConfirmation: (data) => set({ pendingConfirmation: data }),
@@ -1041,6 +1071,7 @@ export const useNightCodeStore = create<NightCodeState>()(
         projects: state.projects,
         settings: state.settings,
         recentModels: state.recentModels,
+        activeSkills: state.activeSkills,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return

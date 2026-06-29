@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback } from "react"
 import type { Message, ToolState, GeneratedImage } from "@/types"
 import {
-  Copy, Check, ThumbsUp, ThumbsDown, Eclipse, RotateCcw,
+  Copy, Check, Eclipse, RotateCcw,
   CheckCircle2, ChevronDown, ChevronRight, Circle,
   FileText, FilePen, Terminal, Trash2, List, FolderCheck, BookOpen, Cable, Bot, Brain,
   Download, ImageOff, Image as ImageIcon,
@@ -14,12 +14,23 @@ import {
   Attachment,
   AttachmentPreview,
 } from "@/components/ai-elements/attachments"
-import { renderInlineMarkdown } from "@/lib/render-markdown"
+import { Streamdown } from "streamdown"
+import { code } from "@streamdown/code"
+import { mermaid } from "@streamdown/mermaid"
+import { math } from "@streamdown/math"
+import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { toast } from "sonner"
 
 const MAX_IMAGE_WIDTH = 500
+
+function normalizeMath(content: string): string {
+  return content
+    .replace(/\\\[([\s\S]*?)\\\]/g, "$$\n$1\n$$")
+    .replace(/\\\(([\s\S]*?)\\\)/g, "$1$")
+    .replace(/(?<!\$)(\\begin\{[a-z]+\*?\}[\s\S]*?\\end\{[a-z]+\*?\})(?!\$)/g, "$$\n$1\n$$")
+}
 
 // ── Shimmer + image card ─────────────────────────────────────────────────────
 function GeneratedImageCard({ image }: { image: GeneratedImage }) {
@@ -232,7 +243,9 @@ function DelegateSummary({ summary }: { summary: string }) {
       >
         <div ref={contentRef}>
           <div className="border-t border-white/10 px-2.5 py-2 text-[13px] leading-relaxed text-[#ccc]">
-            {renderInlineMarkdown(summary)}
+            <Streamdown mode="static" className="nc-prose" plugins={{ code, mermaid, math, cjk }}>
+              {normalizeMath(summary)}
+            </Streamdown>
           </div>
         </div>
       </div>
@@ -696,9 +709,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
 
           {message.content && (
-            <div className="prose prose-invert prose-sm max-w-none w-full min-w-0 mt-1">
-              {renderInlineMarkdown(message.content)}
-            </div>
+            <Streamdown
+              animated
+              className="nc-prose"
+              plugins={{ code, mermaid, math, cjk }}
+              isAnimating={message.status === "streaming"}
+            >
+              {normalizeMath(message.content)}
+            </Streamdown>
           )}
 
           {/* ── Generated images — inline in chat (below text) ──────────────── */}
@@ -723,20 +741,6 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 aria-label="Copy message"
               >
                 {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              </button>
-              <button
-                onClick={() => toast.success("Thanks for the feedback!")}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label="Good response"
-              >
-                <ThumbsUp size={14} />
-              </button>
-              <button
-                onClick={() => toast.success("Thanks for the feedback!")}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label="Bad response"
-              >
-                <ThumbsDown size={14} />
               </button>
               <button
                 onClick={handleRollback}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Search, Plus, Puzzle, Cpu, BrainCircuit, Scroll, Cable } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
+import { useNightCodeStore } from "@/store/nightcode-store"
 import type { SkillInfo } from "@/types"
 type Tab = "skills" | "mcps" | "memory"
 
@@ -42,7 +43,9 @@ export default function CustomizePage() {
   const [activeTab, setActiveTab] = useState<Tab>("skills")
   const [search, setSearch] = useState("")
   const [skills, setSkills] = useState<SkillInfo[]>([])
-  const [activeSkills, setActiveSkills] = useState<Set<string>>(new Set())
+  const storeActiveSkills = useNightCodeStore((s) => s.activeSkills)
+  const toggleActiveSkill = useNightCodeStore((s) => s.toggleActiveSkill)
+  const isSkillActive = useCallback((slug: string) => storeActiveSkills.includes(slug), [storeActiveSkills])
   const [mcps, setMcps] = useState<MCPConfigItem[]>([])
   const [mcpStatuses, setMcpStatuses] = useState<Record<string, string>>({})
   const [mcpError, setMcpError] = useState("")
@@ -66,15 +69,6 @@ export default function CustomizePage() {
         setMcpStatuses(data.statuses ?? {})
       }
     } catch {}
-  }
-
-  function toggleSkill(slug: string) {
-    setActiveSkills((prev) => {
-      const next = new Set(prev)
-      if (next.has(slug)) next.delete(slug)
-      else next.add(slug)
-      return next
-    })
   }
 
   const filteredSkills = skills.filter(
@@ -214,8 +208,8 @@ export default function CustomizePage() {
                   </div>
                   <Switch
                     className="mt-0.5 shrink-0"
-                    checked={activeSkills.has(skill.slug)}
-                    onCheckedChange={() => toggleSkill(skill.slug)}
+                    checked={isSkillActive(skill.slug)}
+                    onCheckedChange={() => toggleActiveSkill(skill.slug)}
                   />
                 </div>
               ))}
@@ -273,9 +267,10 @@ export default function CustomizePage() {
           <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
             <BrainCircuit size={16} />
             Memory
+            <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Coming Soon</span>
           </h2>
           <div className="flex items-center justify-center rounded-xl bg-card p-6 ring-1 ring-foreground/10">
-            <p className="text-sm text-muted-foreground">No memory files yet.</p>
+            <p className="text-sm text-muted-foreground">Memory features are not yet available.</p>
           </div>
         </div>
       )}

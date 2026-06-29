@@ -63,6 +63,44 @@ export interface EngineResult {
   session: Session
 }
 
+function parseFlatQuestions(input: string): Array<{
+  id: string
+  question: string
+  type: string
+  options: Array<{ label: string; value: string }>
+}> {
+  const blocks = input.split("\n\n").filter(Boolean)
+  const questions: Array<{
+    id: string
+    question: string
+    type: string
+    options: Array<{ label: string; value: string }>
+  }> = []
+  for (let i = 0; i < blocks.length; i++) {
+    const lines = blocks[i].trim().split("\n").map((l) => l.trim()).filter(Boolean)
+    if (lines.length < 2) continue
+    const qText = lines[0]
+    const options: Array<{ label: string; value: string }> = []
+    for (const line of lines.slice(1)) {
+      const match = line.match(/^([A-Z])[.)]\s*(.+)/)
+      if (match) {
+        options.push({ label: match[2], value: match[1].toLowerCase() })
+      } else {
+        options.push({ label: line, value: line.toLowerCase().replace(/\s+/g, "-") })
+      }
+    }
+    if (options.length > 0) {
+      questions.push({
+        id: `q${i + 1}`,
+        question: qText,
+        type: "select",
+        options,
+      })
+    }
+  }
+  return questions
+}
+
 export async function runEngine(options: EngineOptions): Promise<EngineResult> {
   const {
     messages,
@@ -81,7 +119,7 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
 
   // Build the conversation for the LLM
   const conversation: SessionMessage[] = [
-    ...messages.slice(0, -1), // all previous messages except the last user msg
+    ...messages,
     { role: "user", parts: [{ type: "text", id: generateId(), text: userMessage }] },
   ]
 
@@ -202,6 +240,7 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
         },
       })
     } catch (err) {
+      if (telemetry) telemetry.stepCount = stepCount
       // Provider error or abort
       if (signal?.aborted) {
         session.suppressTextEmission = false
@@ -226,6 +265,10 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
 
     // Check for pending tool calls
     const pendingCalls = session.getPendingToolCalls()
+
+    console.log(`[loop] step=${stepCount} session parts: ${session.parts.map(p => `${p.type}`).join(', ')}`)
+    console.log(`[loop] pendingCalls: ${pendingCalls.map(c => `[${c.toolCallId}]${c.name}(${JSON.stringify(c.input)})`).join(', ')}`)
+    console.log(`[loop] finishReason=${session.finishReason} usage=${JSON.stringify(session.usage)}`)
 
     // Some providers return "stop" finish_reason even when the response contains
     // tool calls. Check both pending calls AND session parts for tool-call entries.
@@ -319,9 +362,13 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
 
     // Add tool results to conversation (matching opencode's message format)
     const assistantParts = session.parts.filter(
-      (p) => p.type === "text" || (p.type === "tool-call" && !deferredIds.has(p.toolCallId))
+      (p) => p.type === "text" || p.type === "reasoning" || (p.type === "tool-call" && !deferredIds.has(p.toolCallId))
     )
-    conversation.push({ role: "assistant", parts: assistantParts })
+    if (assistantParts.length > 0) {
+      conversation.push({ role: "assistant", parts: assistantParts })
+    }
+    console.log(`[loop] added assistant msg: ${assistantParts.length} parts (${assistantParts.map(p => p.type).join(',')})`)
+    console.log(`[loop] conversation now has ${conversation.length} msgs`)
 
     // Track any errors for the next iteration
     toolInstructions = []
@@ -339,11 +386,16 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
             ? (result.result.value as Record<string, unknown>)
             : {}
           questions = (data as any).questions ?? result.result.value
-          if (typeof questions === "string") questions = JSON.parse(questions as string)
+          if (typeof questions === "string") {
+            try {
+              questions = JSON.parse(questions as string)
+            } catch {
+              questions = parseFlatQuestions(questions as string)
+            }
+          }
         } catch { questions = [] }
         onEvent({ type: "ask", questions })
         askedUser = true
-        continue // skip adding ask result to conversation
       }
 
       // ── Special tool: create_artifact ───────────────────────
@@ -383,7 +435,7 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
       }
       const boundedResult = { ...result, textOutput: boundedText, result: boundedValue }
 
-      // Create tool result part
+      // Create tool result part (added to conversation for ALL tools, including ask)
       const resultPart = {
         type: "tool-result" as const,
         id: generateId(),
@@ -400,24 +452,42 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
         )
       }
 
-      // Emit tool-end event for UI
-      onEvent({
-        type: "tool-end",
-        tool: call.name,
-        args: call.input,
-        status: boundedResult.result.type === "error" ? "error" : "success",
-        result: boundedResult.result.value,
-        error: boundedResult.result.type === "error" ? String(boundedResult.result.value) : undefined,
-        toolCallId: call.toolCallId,
-      })
+      // ── Interactive tools: skip tool-end + lifecyle events ──
+      // For `ask`, the tool lifecycle pauses (waiting for user answers).
+      // No tool-end is emitted — the timeline stays at "running".
+      const isInteractiveTool = call.name === "ask" && boundedResult.result.type !== "error"
 
-      // Record in doom loop tracker
-      doomTracker.record(call.name, call.input as Record<string, unknown>)
+      if (!isInteractiveTool) {
+        // Emit tool-end event for UI
+        const toolStatus = boundedResult.result.type === "error" ? "error" : "verified"
+        onEvent({
+          type: "tool-end",
+          tool: call.name,
+          args: call.input,
+          status: toolStatus,
+          result: boundedResult.result.value,
+          error: boundedResult.result.type === "error" ? String(boundedResult.result.value) : undefined,
+          toolCallId: call.toolCallId,
+        })
 
-      // Invalidate cache for write tools
-      if (sessionCache && (call.name === "write_file" || call.name === "edit_file")) {
-        sessionCache.invalidate(call.name, call.input as Record<string, unknown>)
+        // Record in doom loop tracker
+        doomTracker.record(call.name, call.input as Record<string, unknown>)
+
+        // Invalidate cache for write tools
+        if (sessionCache && (call.name === "write_file" || call.name === "edit_file")) {
+          sessionCache.invalidate(call.name, call.input as Record<string, unknown>)
+        }
       }
+    }
+
+    // Log conversation state before next iteration
+    console.log(`[loop] conversation state (${conversation.length} msgs):`)
+    for (let ci = Math.max(0, conversation.length - 4); ci < conversation.length; ci++) {
+      const m = conversation[ci]
+      const tcs = m.parts.filter(p => p.type === "tool-call")
+      const trs = m.parts.filter(p => p.type === "tool-result")
+      const txts = m.parts.filter(p => p.type === "text")
+      console.log(`[loop]   [${ci}] ${m.role}: txt=${txts.length} tc=${tcs.length}(${(tcs as any[]).map((t:any) => `${t.name}`).join(',')}) tr=${trs.length}(${(trs as any[]).map((t:any) => `${t.name}`).join(',')})`)
     }
 
     // Track whether tools were called this step (for context manager loop guard)

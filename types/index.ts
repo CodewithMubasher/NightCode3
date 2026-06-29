@@ -88,6 +88,8 @@ export interface AskQuestion {
   id: string
   question: string
   options: AskOption[]
+  type?: "select" | "multiselect" | "text"
+  allowCustom?: boolean
 }
 
 export interface AskData {

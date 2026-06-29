@@ -2,7 +2,7 @@ import type { AIProvider } from "@/types"
 import * as fs from "fs"
 import * as path from "path"
 import { AGENT_CONFIG, CAAT_CONFIG, PLAN_CONFIG, type ModeConfig } from "./modes"
-import { buildRequest, buildDynamicBlock, invalidateCompactionCache } from "./context-builder"
+import { buildRequest, buildDynamicBlock, invalidateCompactionCache, BUILD_SWITCH_INSTRUCTIONS } from "./context-builder"
 import { planStep } from "./planner"
 import { flushBatch } from "@/lib/db/batch"
 import { executeTool } from "./executor"
@@ -611,13 +611,13 @@ export async function executeEngineRun(
           } else {
             currentMode = "build"
             currentConfig = AGENT_CONFIG
-            // Rebuild system prompt for BUILD mode (was PLAN prompt)
+            // Rebuild system prompt for BUILD mode (model identity prompt — no plan swap)
             const { buildSystemPrompt } = await import("./context-builder")
-            currentSystemPrompt = buildSystemPrompt("standard", undefined, model)
+            currentSystemPrompt = buildSystemPrompt(model)
             availableTools = currentConfig.tools
               .map((t) => TOOL_REGISTRY[t.name])
               .filter(Boolean) as ToolImplementation[]
-            const switchNote = `[SYSTEM: Mode switched from PLAN to BUILD. Here is the planning summary:\n\n${planSummary}\n\nYou now have full write/edit access. Continue with the implementation based on the investigation above.]`
+            const switchNote = `${BUILD_SWITCH_INSTRUCTIONS}\n\nHere is the planning summary:\n\n${planSummary}`
             toolResultMessages.push({
               role: "system",
               content: [{ type: "text", text: switchNote }],

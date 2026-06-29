@@ -59,8 +59,11 @@ async function parseGeminiStream(
             } else if (typeof rawArgs === "string") {
               try { args = JSON.parse(rawArgs) } catch { args = { _raw: rawArgs } }
             }
+            const uniqueId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+            callbacks.onToolCallStart?.(uniqueId, name)
+            callbacks.onToolCallDelta?.(uniqueId, JSON.stringify(args))
             collectedToolCalls.push({
-              toolCallId: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              toolCallId: uniqueId,
               toolName: name,
               args,
             })
@@ -102,7 +105,7 @@ function buildGeminiTools(tools: ToolDef[]): unknown[] {
         const isOptional =
           (typeof value === "string" && value.endsWith("?")) ||
           (value && typeof value === "object" && "_def" in value &&
-            ((value as any)._def?.typeName === "ZodOptional" || (value as any)._def?.typeName === "ZodNullable"))
+            ((value as any)._def?.type === "optional" || (value as any)._def?.type === "nullable"))
 
         if (!isOptional) {
           required.push(key)

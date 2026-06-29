@@ -39,6 +39,7 @@ export default function ProjectsPage() {
   const [name, setName] = useState("")
   const [desc, setDesc] = useState("")
   const [loading, setLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
 
   async function handleCreate() {
     if (!name.trim() || loading) return
@@ -61,7 +62,10 @@ export default function ProjectsPage() {
     if (confirm("Delete this project?")) deleteProject(id)
   }
 
-  const sorted = [...projects].sort((a, b) => {
+  const q = searchQuery.toLowerCase()
+  const sorted = [...projects]
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q)))
+    .sort((a, b) => {
     if (a.starred !== b.starred) return a.starred ? -1 : 1
     return b.updatedAt - a.updatedAt
   })
@@ -76,7 +80,7 @@ export default function ProjectsPage() {
               size={14}
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
             />
-            <Input placeholder="Search..." className="h-8 w-44 pl-8 text-sm" />
+            <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-8 w-44 pl-8 text-sm" />
           </div>
           <Button size="sm" onClick={() => setOpen(true)}>
             <Plus size={14} />

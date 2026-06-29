@@ -7,14 +7,13 @@ import { createSession } from "@/lib/db/adapter"
 import { enableBatching, disableBatching, flushBatch } from "@/lib/db/batch"
 import { loadMCPConfigs } from "@/lib/mcp/storage"
 import { ensureConnected } from "@/lib/mcp/manager"
-import { buildSystemPrompt } from "@/lib/engine/context-builder"
+import { buildSystemPrompt, PLAN_MODE_INSTRUCTIONS } from "@/lib/engine/context-builder"
 import { TOOL_REGISTRY } from "@/lib/engine/tools"
 import { AGENT_CONFIG, CAAT_CONFIG, PLAN_CONFIG } from "@/lib/engine/modes"
 import { runEngine, CacheManager, Telemetry } from "@/lib/engine2"
 import { messagesToSessionMessages, toolsToRecord, createProviderStreamFn } from "@/lib/engine2/bridge"
 import type { SessionEvent } from "@/lib/engine2/types"
 
-let mcpToolsPromise: Promise<ToolImplementation[]> | null = null
 const globalCache = new CacheManager()
 
 const SSE_API_KEY = process.env.SSE_API_KEY
@@ -28,19 +27,14 @@ function requireAuth(req: Request): Response | null {
   return null
 }
 
-function getMCPTools(): Promise<ToolImplementation[]> {
-  if (!mcpToolsPromise) {
-    mcpToolsPromise = (async () => {
-      const configs = loadMCPConfigs()
-      for (const config of configs) {
-        if (config.enabled) {
-          await ensureConnected(config)
-        }
-      }
-      return createMCPToolImplementations()
-    })()
+async function getMCPTools(): Promise<ToolImplementation[]> {
+  const configs = loadMCPConfigs()
+  for (const config of configs) {
+    if (config.enabled) {
+      await ensureConnected(config)
+    }
   }
-  return mcpToolsPromise
+  return createMCPToolImplementations()
 }
 
 function sessionEventToSSE(event: SessionEvent): { type: string; payload: Record<string, unknown>; timestamp: number } | null {
@@ -214,11 +208,18 @@ export async function POST(req: Request) {
     const lastUserMsg = messagesTyped[messagesTyped.length - 1]
     const userText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : ""
 
-    const basePrompt = buildSystemPrompt(effectiveMode as "standard" | "caat" | "plan", mcpTools, effectiveModel, userText)
+    // System prompt contains only the model identity + env + AGENTS.md.
+    // Mode instructions (plan, caat) are injected as synthetic messages, not in the prompt.
+    const basePrompt = buildSystemPrompt(effectiveModel)
     const systemPrompt = skillInjected ? basePrompt + "\n\n" + skillInjected : basePrompt
 
     // ─── Convert messages to engine2 format ─────────────────────────
     const sessionMessages = messagesToSessionMessages(messagesTyped)
+
+    // Inject plan mode as synthetic user message (opencode style with <system-reminder>)
+    if (effectiveMode === "plan") {
+      sessionMessages.unshift({ role: "user", parts: [{ type: "text", id: "plan-mode", text: PLAN_MODE_INSTRUCTIONS }] })
+    }
 
     // ─── Create provider stream function ─────────────────────────────
     if (abortController.signal.aborted) {

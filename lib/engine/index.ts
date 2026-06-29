@@ -2,7 +2,7 @@ import type { Message, AIProvider } from "@/types"
 import * as fs from "fs"
 import * as path from "path"
 import { EventEmitter } from "./event-emitter"
-import { buildSystemPrompt, buildRequest } from "./context-builder"
+import { buildSystemPrompt, buildRequest, PLAN_MODE_INSTRUCTIONS } from "./context-builder"
 import { AGENT_CONFIG, CAAT_CONFIG, PLAN_CONFIG } from "./modes"
 import { TOOL_REGISTRY, type ToolImplementation } from "./tools"
 import { ToolIsolationService } from "./tool-isolation-service"
@@ -100,7 +100,7 @@ export class NightCodeEngine {
     const lastUserMsg = messages[messages.length - 1]
     const userText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : ""
 
-    const basePrompt = buildSystemPrompt(currentMode as "standard" | "caat" | "plan", mcpTools, model, userText)
+    const basePrompt = buildSystemPrompt(model)
     const fullSystemPrompt = skillInjected
       ? basePrompt + "\n\n" + skillInjected
       : basePrompt
@@ -129,10 +129,15 @@ export class NightCodeEngine {
     // NOTE: Capability-based tool selection was removed.
     // All tools are sent to every request. Optimize later.
 
-    const strippedMessages = messages.map((m) => ({
+    const strippedMessages: Array<{ role: string; content: unknown }> = messages.map((m) => ({
       role: m.role,
       content: typeof m.content === "string" ? m.content.replace(/<think>[\s\S]*?<\/think>/g, "").trim() : m.content,
     }))
+
+    // Inject plan mode as synthetic user message (opencode style with <system-reminder>)
+    if (currentMode === "plan") {
+      strippedMessages.unshift({ role: "user", content: PLAN_MODE_INSTRUCTIONS })
+    }
 
     const built = buildRequest(strippedMessages as import("@/types").Message[], fullSystemPrompt, messageId)
     const requestSystemPrompt = built.system

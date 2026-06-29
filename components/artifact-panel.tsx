@@ -5,8 +5,19 @@ import { X, FileText, ChevronLeft, Download, Copy, Trash2 } from "lucide-react"
 import { useNightCodeStore } from "@/store/nightcode-store"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { renderInlineMarkdown } from "@/lib/render-markdown"
+import { Streamdown } from "streamdown"
+import { code } from "@streamdown/code"
+import { mermaid } from "@streamdown/mermaid"
+import { math } from "@streamdown/math"
+import { cjk } from "@streamdown/cjk"
 import type { Artifact } from "@/types"
+
+function normalizeMath(content: string): string {
+  return content
+    .replace(/\\\[([\s\S]*?)\\\]/g, "$$\n$1\n$$")
+    .replace(/\\\(([\s\S]*?)\\\)/g, "$1$")
+    .replace(/(?<!\$)(\\begin\{[a-z]+\*?\}[\s\S]*?\\end\{[a-z]+\*?\})(?!\$)/g, "$$\n$1\n$$")
+}
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
@@ -302,9 +313,11 @@ export function ArtifactPanel() {
                 <div
                   ref={proseRef}
                   onDoubleClick={handleDoubleClick}
-                  className="prose prose-invert prose-sm max-w-none min-w-0 cursor-default select-text"
+                  className="min-w-0 cursor-default select-text"
                 >
-                  {renderInlineMarkdown(activeArtifact.content)}
+                  <Streamdown mode="static" className="nc-prose" plugins={{ code, mermaid, math, cjk }}>
+                    {normalizeMath(activeArtifact.content)}
+                  </Streamdown>
                 </div>
               )}
             </div>

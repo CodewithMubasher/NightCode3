@@ -458,7 +458,7 @@ export type ProviderStreamFn = (
   messages: ProviderMessage[],
   system?: string,
   tools?: ToolDefinition[],
-  callbacks?: { onText?: (text: string) => void; onReasoning?: (text: string) => void },
+  callbacks?: { onText?: (text: string) => void; onReasoning?: (text: string) => void; onToolCallStart?: (toolCallId: string, name: string) => void; onToolCallDelta?: (toolCallId: string, text: string) => void },
   signal?: AbortSignal,
 ) => Promise<{
   text: string
