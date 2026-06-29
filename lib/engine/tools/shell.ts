@@ -41,7 +41,7 @@ function resolveCwd(dirPath: string): string {
   const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(WORKSPACE, dirPath)
   const normalized = path.normalize(resolved)
   if (!normalized.toLowerCase().startsWith(WORKSPACE.toLowerCase())) {
-    throw new Error(`Working directory "${dirPath}" is outside the workspace`)
+    return normalized // Allow absolute paths outside workspace — user may be working on a different project
   }
   return normalized
 }

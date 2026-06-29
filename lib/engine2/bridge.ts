@@ -142,6 +142,7 @@ export function createProviderStreamFn(
         toolName: tc.toolName,
         args: tc.args,
       })),
+      finishReason: result.value.finishReason,
       usage: result.value.usage,
     }
   }

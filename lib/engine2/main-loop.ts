@@ -88,6 +88,7 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
   let toolInstructions: string[] = []
   let stepCount = 0
   let consecutiveToolFailures = 0
+  let lastStepHadToolCalls = false
   let session = new Session(generateId(), {
     onEvent,
     onStatusChange: () => {},
@@ -138,9 +139,11 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
           lastTextLength: accumulatedText.length,
           consecutiveToolFailures,
           isFirstStep: stepCount === 1,
-          hasPendingToolCalls: false,
+          hasPendingToolCalls: lastStepHadToolCalls,
         },
       )
+
+      console.log(`[ctx-manager] step=${stepCount} lastTextLen=${accumulatedText.length} hasTools=${lastStepHadToolCalls} decision=${report.decision.action}`)
 
       if (report.decision.action === "stop") {
         if (!accumulatedText) {
@@ -163,16 +166,8 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
 
     // Create a new session for this step
     session.dispose()
-    const emit = onEvent
-    let stepTextBuffer = ""
     session = new Session(generateId(), {
-      onEvent: (event) => {
-        if (event.type === "text-delta") {
-          stepTextBuffer += event.text
-          return
-        }
-        emit(event)
-      },
+      onEvent,
     })
 
     // Convert conversation to provider message format
@@ -193,6 +188,9 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
     // Add tool failure guidance
     const systemMsg = buildSystemMessage(systemPrompt, toolInstructions)
 
+    // Suppress text-delta emission during streaming (emit manually after)
+    session.suppressTextEmission = true
+
     try {
       await adapter.stream({
         messages: providerMessages,
@@ -206,11 +204,13 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
     } catch (err) {
       // Provider error or abort
       if (signal?.aborted) {
+        session.suppressTextEmission = false
         return { text: accumulatedText, reasoning: accumulatedReasoning, usage: finalUsage, steps: stepCount, session }
       }
       const errorMsg = err instanceof Error ? err.message : String(err)
       onEvent({ type: "error", message: errorMsg })
       session.error = errorMsg
+      session.suppressTextEmission = false
       session.dispose()
       return { text: accumulatedText || `Error: ${errorMsg}`, reasoning: accumulatedReasoning, usage: finalUsage, steps: stepCount, session }
     }
@@ -227,23 +227,32 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
     // Check for pending tool calls
     const pendingCalls = session.getPendingToolCalls()
 
+    // Some providers return "stop" finish_reason even when the response contains
+    // tool calls. Check both pending calls AND session parts for tool-call entries.
+    // (Matches opencode's approach in session/prompt.ts line 1206-1233.)
+    console.log(`[final-step] streaming completed: textLen=${stepText.length} pendingCalls=${pendingCalls.length} hasToolCallParts=${session.parts.some(p => p.type === "tool-call")}`)
+
     if (pendingCalls.length === 0) {
-      // Final step — flush buffered text and accumulate
-      if (stepTextBuffer) {
-        onEvent({ type: "text-delta", text: stepTextBuffer })
+      const hasToolCallParts = session.parts.some(p => p.type === "tool-call")
+      if (!hasToolCallParts) {
+        // Final step — re-emit text to UI and accumulate
+        session.suppressTextEmission = false
+        if (stepText) {
+          onEvent({ type: "text-delta", text: stepText })
+          accumulatedText = (accumulatedText ? "\n\n" : "") + stepText
+        }
+        if (stepReasoning) {
+          accumulatedReasoning += (accumulatedReasoning ? "\n" : "") + stepReasoning
+        }
+        break
       }
-      if (stepText) {
-        accumulatedText = (accumulatedText ? "\n\n" : "") + stepText
-      }
-      if (stepReasoning) {
-        accumulatedReasoning += (accumulatedReasoning ? "\n" : "") + stepReasoning
-      }
-      break
+      console.log(`[safety-net] pendingCalls=0 but hasToolCallParts=true — falling through to dispatch`)
     }
 
-    // Intermediate step — emit buffered text as reasoning (not chat)
-    if (stepTextBuffer) {
-      onEvent({ type: "reasoning-delta", text: stepTextBuffer })
+    // Intermediate step — emit text as reasoning (model's internal monologue)
+    session.suppressTextEmission = false
+    if (stepText) {
+      onEvent({ type: "reasoning-delta", text: stepText })
     }
 
     // Defer URL opens when shell runs in the same step (URL depends on shell output)
@@ -410,6 +419,9 @@ export async function runEngine(options: EngineOptions): Promise<EngineResult> {
         sessionCache.invalidate(call.name, call.input as Record<string, unknown>)
       }
     }
+
+    // Track whether tools were called this step (for context manager loop guard)
+    lastStepHadToolCalls = activeCalls.length > 0
 
     // If we asked the user, pause — don't continue the loop
     if (askedUser) break

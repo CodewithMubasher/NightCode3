@@ -6,7 +6,7 @@ export type { UsageInfo }
 
 export type StepResult =
   | { type: "text"; content: string; reasoning?: string; usage?: UsageInfo }
-  | { type: "tool_calls"; text: string; reasoning?: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>; usage?: UsageInfo }
+  | { type: "tool_calls"; text: string; reasoning?: string; toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> | null }>; usage?: UsageInfo }
 
 export type PlannerCallbacks = {
   onText?: (text: string) => void

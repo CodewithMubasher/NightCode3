@@ -6,7 +6,7 @@
     "args": [],
     "url": "",
     "environment": {},
-    "enabled": true
+    "enabled": false
   },
   {
     "name": "gmail_mcp",

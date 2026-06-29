@@ -258,7 +258,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
   const iconColor = isFailed || execFailed ? "#EF4444" : "#B3B3B3"
   const textColor = isFailed || execFailed ? "#EF4444" : "#E0E0E0"
 
-  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill"].includes(toolState.tool)
+  const isFilePath = ["read_file", "write_file", "delete_file", "create_artifact", "edit_artifact", "read_artifact", "skill", "list_directory"].includes(toolState.tool)
   const isDelegate = toolState.tool === "delegate_task" || toolState.tool === "expert_agent"
   const isImageGen = toolState.tool === "generate_image"
 
@@ -271,7 +271,7 @@ function ToolTimelineItem({ toolState, iconDelay = 0 }: ToolTimelineItemProps) {
     list_artifacts: () => "Listed artifacts",
     read_artifact: (a) => a ?? "Read artifact",
     edit_artifact: (a) => a ?? "Edited artifact",
-    list_directory: (a) => a ? `Listed ${a}` : "Listed directory",
+    list_directory: () => "Listed directory",
     search_files: () => "Searched files",
     shell: () => exitCode != null ? (execFailed ? `Failed (exit ${exitCode})` : `Done (exit ${exitCode})`) : "Run command",
     think: () => "Thinking",

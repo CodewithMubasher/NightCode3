@@ -1,4 +1,5 @@
 import type { GatewayCallbacks, StreamResult, ToolDef, UsageInfo } from "./common"
+import { schemaValueToJsonSchema } from "./common"
 import { getTemperature, ApiError } from "./common"
 
 async function parseGeminiStream(
@@ -84,30 +85,40 @@ async function parseGeminiStream(
 
 function buildGeminiTools(tools: ToolDef[]): unknown[] {
   return [{
-    functionDeclarations: tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: {
-        type: "object",
-        properties: Object.entries(t.schema).reduce((acc, [key, type]) => {
-          const isOptional = typeof type === "string" && type.endsWith("?")
-          const baseType = typeof type === "string" ? type.replace("?", "").trim() : "string"
-          let tsType: string
-          switch (baseType) {
-            case "number": tsType = "number"; break
-            case "boolean": tsType = "boolean"; break
-            case "string[]": tsType = "array"; break
-            default: tsType = "string"
-          }
-          acc[key] = { type: tsType, description: typeof type === "string" ? type : "parameter" }
-          if (isOptional) acc[key].nullable = true
-          return acc
-        }, {} as Record<string, any>),
-        required: Object.entries(t.schema)
-          .filter(([, type]) => !(typeof type === "string" && type.endsWith("?")))
-          .map(([key]) => key),
-      },
-    })),
+    functionDeclarations: tools.map((t) => {
+      const entries = Object.entries(t.schema)
+      const properties: Record<string, unknown> = {}
+      const required: string[] = []
+
+      for (const [key, value] of entries) {
+        const prop = schemaValueToJsonSchema(value)
+        // Gemini uses "nullable" instead of "optional"
+        if (prop.optional === true) {
+          prop.nullable = true
+          delete prop.optional
+        }
+        properties[key] = prop
+
+        const isOptional =
+          (typeof value === "string" && value.endsWith("?")) ||
+          (value && typeof value === "object" && "_def" in value &&
+            ((value as any)._def?.typeName === "ZodOptional" || (value as any)._def?.typeName === "ZodNullable"))
+
+        if (!isOptional) {
+          required.push(key)
+        }
+      }
+
+      return {
+        name: t.name,
+        description: t.description,
+        parameters: {
+          type: "object",
+          properties,
+          required: required.length > 0 ? required : undefined,
+        },
+      }
+    }),
   }]
 }
 

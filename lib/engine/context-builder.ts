@@ -3,6 +3,7 @@ import type { ToolImplementation } from "./tools"
 import { getCompactionsBySession } from "@/lib/db/adapter"
 import { listArtifacts } from "@/lib/engine/artifact-store"
 import * as path from "path"
+import * as fs from "fs"
 
 const AGENT_PROMPT = `You are NightCode, an intelligent AI coding assistant with access to tools.
 
@@ -270,6 +271,86 @@ export function isSimpleTask(userMessage: string): boolean {
   return SIMPLE_TASK_PATTERNS.some((p) => p.test(trimmed))
 }
 
+// ─── AGENTS.md discovery and loading ─────────────────────────────────────
+// Loads AGENTS.md files from the workspace root and its parent directories,
+// plus a global AGENTS.md in the NightCode config directory.
+// Matches opencode's InstructionContext pattern.
+const AGENTS_MD_FILES = ["AGENTS.md", ".agents/AGENTS.md"]
+
+function discoverAgentsMdFiles(workspaceRoot: string, projectRoot?: string): string[] {
+  const found: string[] = []
+  const seen = new Set<string>()
+
+  // Walk up from workspace root to find AGENTS.md files
+  let current = path.resolve(workspaceRoot)
+  const root = path.parse(current).root
+  while (true) {
+    for (const name of AGENTS_MD_FILES) {
+      const p = path.join(current, name)
+      if (fs.existsSync(p) && !seen.has(p)) {
+        seen.add(p)
+        found.push(p)
+      }
+    }
+    if (current === root) break
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+
+  // Also check the NightCode project root if different from workspace
+  if (projectRoot && projectRoot !== path.resolve(workspaceRoot)) {
+    current = path.resolve(projectRoot)
+    while (true) {
+      for (const name of AGENTS_MD_FILES) {
+        const p = path.join(current, name)
+        if (fs.existsSync(p) && !seen.has(p)) {
+          seen.add(p)
+          found.push(p)
+        }
+      }
+      if (current === root) break
+      const parent = path.dirname(current)
+      if (parent === current) break
+      current = parent
+    }
+  }
+
+  return found
+}
+
+function getProjectRoot(): string | undefined {
+  const scriptDir = __dirname
+  // Walk up to find package.json (NightCode project root)
+  let current = path.resolve(scriptDir)
+  const root = path.parse(current).root
+  while (true) {
+    if (fs.existsSync(path.join(current, "package.json"))) {
+      return current
+    }
+    if (current === root) break
+    current = path.dirname(current)
+  }
+  return undefined
+}
+
+function loadAgentsMdInstructions(workspaceRoot: string): string | null {
+  const projectRoot = getProjectRoot()
+  const files = discoverAgentsMdFiles(workspaceRoot, projectRoot)
+  if (files.length === 0) return null
+  return files
+    .map((filePath) => {
+      try {
+        const content = fs.readFileSync(filePath, "utf-8").trim()
+        return `Instructions from: ${filePath}\n${content}`
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .join("\n\n")
+}
+
 export function buildSystemPrompt(mode?: "standard" | "caat" | "plan", mcpTools?: ToolImplementation[], modelId?: string, userMessage?: string): string {
 
   const basePrompt = mode === "caat"
@@ -305,7 +386,14 @@ export function buildSystemPrompt(mode?: "standard" | "caat" | "plan", mcpTools?
     "Replace with: editing, filesystem, desktop, gmail, excel, word, browser, obsidian, command, media, or knowledge.\n" +
     "The system will load the relevant tools and re-prompt you.\n\n"
 
+  // Load AGENTS.md instructions (opencode-style injection)
+  const agentsMd = loadAgentsMdInstructions(workspaceRoot)
+
   let prompt = `Here is some useful information about the environment you are running in:\n${envBlock}\n\n${pathGuidance}\n\n${escapeHatch}${basePrompt}`
+
+  if (agentsMd) {
+    prompt += `\n\n${agentsMd}`
+  }
 
   if (mcpTools && mcpTools.length > 0) {
     const mcpSection = mcpTools

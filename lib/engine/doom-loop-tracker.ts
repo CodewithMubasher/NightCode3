@@ -15,12 +15,13 @@ export class DoomLoopTracker {
     this.maxHistory = maxHistory
   }
 
-  private hash(args: Record<string, unknown>): string {
-    const stable = JSON.stringify(args, Object.keys(args).sort())
+  private hash(args: Record<string, unknown> | null | undefined): string {
+    const safe = args ?? {}
+    const stable = JSON.stringify(safe, Object.keys(safe).sort())
     return crypto.createHash("md5").update(stable).digest("hex").slice(0, 8)
   }
 
-  check(toolName: string, args: Record<string, unknown>): DoomLoopResult {
+  check(toolName: string, args: Record<string, unknown> | null | undefined): DoomLoopResult {
     const argsHash = this.hash(args)
 
     if (this.history.length < 3) {
@@ -38,7 +39,7 @@ export class DoomLoopTracker {
     }
   }
 
-  record(toolName: string, args: Record<string, unknown>): void {
+  record(toolName: string, args: Record<string, unknown> | null | undefined): void {
     const argsHash = this.hash(args)
     this.history.push({ toolName, argsHash })
     if (this.history.length > this.maxHistory) {

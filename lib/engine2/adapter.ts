@@ -77,8 +77,17 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
         }
 
         // Emit tool call events
+        if (result.toolCalls.length > 0) {
+          console.log(`[adapter] Tool calls from provider:`, result.toolCalls.map(tc => ({
+            name: tc.toolName,
+            argsType: typeof tc.args,
+            argsNull: tc.args === null,
+            argsKeys: tc.args ? Object.keys(tc.args) : [],
+          })))
+        }
         for (const tc of result.toolCalls) {
           const callId = createToolCallId()
+          const safeArgs = tc.args ?? {}
           emit({
             type: "tool-input-start",
             id: callId,
@@ -88,7 +97,7 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
             type: "tool-input-delta",
             id: callId,
             name: tc.toolName,
-            text: JSON.stringify(tc.args),
+            text: JSON.stringify(safeArgs),
           })
           emit({
             type: "tool-input-end",
@@ -99,13 +108,17 @@ export function createAdapter(providerStream: ProviderStreamFn): LLMAdapter {
             type: "tool-call",
             id: callId,
             name: tc.toolName,
-            input: tc.args,
+            input: safeArgs,
           })
         }
 
         // Emit step-finish + finish
+        // Some providers return "stop" even when tool calls are present.
+        // Always check toolCalls first, fall back to provider's finish_reason.
         const reason =
-          result.toolCalls.length > 0 ? "tool-calls" : "stop"
+          result.toolCalls.length > 0 ? "tool-calls"
+          : result.finishReason === "tool_calls" ? "tool-calls"
+          : "stop"
 
         emit({
           type: "step-finish",

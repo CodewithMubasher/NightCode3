@@ -463,6 +463,7 @@ export type ProviderStreamFn = (
 ) => Promise<{
   text: string
   reasoning: string
-  toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>
+  toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> | null }>
+  finishReason?: string
   usage?: Usage
 }>

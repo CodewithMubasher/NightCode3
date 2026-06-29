@@ -263,7 +263,7 @@ export async function executeEngineRun(
         toolCallCount++
         const resolvedName = toolAliases[tc.toolName] ?? tc.toolName
         const toolDef = availableTools.find((t) => normalizeToolName(t.name) === normalizeToolName(resolvedName))
-        const generatedId = toolIsolation?.registerToolCall(tc.toolName, tc.args, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
+        const generatedId = toolIsolation?.registerToolCall(tc.toolName, tc.args ?? {}, toolCallCount) ?? `tool_${toolCallCount}_${generateId().slice(0, 8)}`
         let args = tc.args
         if (args === null || args === undefined) {
           const msg = `Malformed tool call: ${tc.toolName} received invalid arguments. The model produced broken JSON.`
@@ -282,8 +282,8 @@ export async function executeEngineRun(
           roundTotal++
           return { ...tc, toolDef: undefined, generatedId, args: null as null, resolvedName, malformed: true } as const
         }
-        doomLoopTracker.record(tc.toolName, tc.args)
-        missionTracker?.recordToolCall(tc.toolName, tc.args)
+        doomLoopTracker.record(tc.toolName, tc.args ?? {})
+        missionTracker?.recordToolCall(tc.toolName, tc.args ?? {})
         return { ...tc, toolDef, generatedId, args, resolvedName, malformed: false } as const
       })
 
@@ -717,9 +717,10 @@ export async function executeEngineRun(
         }
       }
       for (const tc of step.toolCalls) {
+        const safeArgs = tc.args ?? {}
         const input = tc.toolName === "write_file"
-          ? { path: tc.args.path, bytes: typeof tc.args.content === "string" ? tc.args.content.length : 0 }
-          : tc.args
+          ? { path: safeArgs.path, bytes: typeof safeArgs.content === "string" ? safeArgs.content.length : 0 }
+          : safeArgs
         assistantContent.push({
           type: "tool-call",
           toolCallId: tc.toolCallId,

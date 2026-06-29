@@ -1,101 +1,221 @@
 import type { GatewayCallbacks, StreamResult, ToolDef, UsageInfo } from "./common"
 import { buildToolsArray, getTemperature, getModelParam, formatOpenAIMessages, extractInlineToolCalls, ApiError } from "./common"
 
+interface PendingTool {
+  toolCallId: string
+  toolName: string
+  input: string
+}
+
 async function parseOpenAIStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
   callbacks: GatewayCallbacks,
-): Promise<{ text: string; reasoning: string; toolCalls: StreamResult["toolCalls"]; usage?: UsageInfo }> {
+): Promise<{ text: string; reasoning: string; toolCalls: StreamResult["toolCalls"]; finishReason?: string; usage?: UsageInfo }> {
   const decoder = new TextDecoder()
   let buffer = ""
-    let collectedText = ""
-    let collectedReasoning = ""
-    const collectedToolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> | null }> = []
-    let usage: UsageInfo | undefined
+  let collectedText = ""
+  let collectedReasoning = ""
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError")
+  // ToolStream: track pending tool calls by index from delta.tool_calls[].index
+  const toolStream = new Map<number, PendingTool>()
+  let finishReason: string | undefined
+  let gotNonDeltaToolCalls = false
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() || ""
+  // Final collected tool calls
+  const finalToolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> | null }> = []
+  let usage: UsageInfo | undefined
 
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed === "data: [DONE]") continue
-        if (!trimmed.startsWith("data: ")) continue
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError")
 
-        try {
-          const json = JSON.parse(trimmed.slice(6))
-          const choices = json.choices ?? []
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() || ""
 
-          if (choices.length > 0 && choices[0].message?.content && !choices[0].delta) {
-            const msg = choices[0].message
-            if (msg.content) {
-              callbacks.onText?.(msg.content)
-              collectedText += msg.content
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === "data: [DONE]") continue
+      if (!trimmed.startsWith("data: ")) continue
+
+      try {
+        const json = JSON.parse(trimmed.slice(6))
+        const choices = json.choices ?? []
+
+        // Non-delta message chunks — some providers send tool calls as message, not delta
+        if (choices.length > 0 && !choices[0].delta) {
+          const msg = choices[0].message
+          if (msg?.tool_calls) {
+            gotNonDeltaToolCalls = true
+            for (const tc of msg.tool_calls) {
+              if (tc.function?.name) {
+                let args: Record<string, unknown> = {}
+                if (typeof tc.function.arguments === "string") {
+                  try { args = JSON.parse(tc.function.arguments) } catch {}
+                } else if (typeof tc.function.arguments === "object" && tc.function.arguments !== null) {
+                  args = tc.function.arguments as Record<string, unknown>
+                }
+                finalToolCalls.push({
+                  toolCallId: tc.id ?? `call_${Date.now()}`,
+                  toolName: tc.function.name,
+                  args,
+                })
+              }
             }
+          } else if (msg?.content) {
+            callbacks.onText?.(msg.content)
+            collectedText += msg.content
+          }
+          if (choices[0].finish_reason) {
+            finishReason = choices[0].finish_reason
+          }
+        }
+
+        for (const choice of choices) {
+          const delta = choice.delta ?? {}
+
+          if (delta.content) {
+            callbacks.onText?.(delta.content)
+            collectedText += delta.content
           }
 
-          for (const choice of choices) {
-            const delta = choice.delta ?? {}
+          // Track finish_reason from the provider
+          if (choice.finish_reason) {
+            finishReason = choice.finish_reason
+          }
 
-            if (delta.content) {
-              callbacks.onText?.(delta.content)
-              collectedText += delta.content
-            }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const index = tc.index ?? toolStream.size
+              const existing = toolStream.get(index)
 
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                if (tc.function?.name) {
-                  collectedToolCalls.push({
-                    toolCallId: tc.id ?? `call_${Date.now()}`,
-                    toolName: tc.function.name,
-                    args: {},
+              // First delta for this index → start new tool (appendOrStart)
+              if (!existing && tc.function?.name) {
+                toolStream.set(index, {
+                  toolCallId: tc.id ?? `call_${Date.now()}`,
+                  toolName: tc.function.name,
+                  input: "",
+                })
+              }
+
+              // Append argument text across chunks (accumulate, don't parse yet)
+              const current = toolStream.get(index)
+              if (current && tc.function?.arguments) {
+                if (typeof tc.function.arguments === "string") {
+                  current.input += tc.function.arguments
+                } else if (typeof tc.function.arguments === "object" && tc.function.arguments !== null) {
+                  // Provider pre-parsed the JSON — finalize immediately
+                  current.input = ""
+                  finalToolCalls.push({
+                    toolCallId: current.toolCallId,
+                    toolName: current.toolName,
+                    args: tc.function.arguments as Record<string, unknown>,
                   })
-                }
-                if (tc.function?.arguments && collectedToolCalls.length > 0) {
-                  const last = collectedToolCalls[collectedToolCalls.length - 1]
-                  try {
-                    const parsed = JSON.parse(tc.function.arguments)
-                    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-                      last.args = { ...last.args, ...parsed }
-                    } else {
-                      last.args = null
-                    }
-                  } catch {
-                    last.args = null
-                  }
+                  toolStream.delete(index)
                 }
               }
             }
           }
+        }
 
-          if (json.usage) {
-            usage = {
-              inputTokens: json.usage.prompt_tokens ?? json.usage.inputTokens ?? 0,
-              outputTokens: json.usage.completion_tokens ?? json.usage.outputTokens ?? 0,
-              reasoningTokens: json.usage.reasoning_tokens ?? undefined,
+        // finish_reason with pending tools → finishAll: parse accumulated JSON
+        if (finishReason && toolStream.size > 0) {
+          for (const [, pending] of toolStream) {
+            if (pending.input) {
+              try {
+                const parsed = JSON.parse(pending.input)
+                if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                  finalToolCalls.push({
+                    toolCallId: pending.toolCallId,
+                    toolName: pending.toolName,
+                    args: parsed as Record<string, unknown>,
+                  })
+                } else {
+                  finalToolCalls.push({
+                    toolCallId: pending.toolCallId,
+                    toolName: pending.toolName,
+                    args: {},
+                  })
+                }
+              } catch {
+                finalToolCalls.push({
+                  toolCallId: pending.toolCallId,
+                  toolName: pending.toolName,
+                  args: {},
+                })
+              }
+            } else if (!finalToolCalls.some(tc => tc.toolCallId === pending.toolCallId)) {
+              // Tool with no arg text accumulated — still finalize with empty args
+              finalToolCalls.push({
+                toolCallId: pending.toolCallId,
+                toolName: pending.toolName,
+                args: {},
+              })
             }
           }
-        } catch {
-          // skip malformed JSON lines
+          toolStream.clear()
         }
+
+        if (json.usage) {
+          usage = {
+            inputTokens: json.usage.prompt_tokens ?? json.usage.inputTokens ?? 0,
+            outputTokens: json.usage.completion_tokens ?? json.usage.outputTokens ?? 0,
+            reasoningTokens: json.usage.reasoning_tokens ?? undefined,
+          }
+        }
+      } catch {
+        // skip malformed JSON lines
       }
     }
+  }
 
-  if (collectedToolCalls.length === 0) {
+  // Finalize any remaining un-finalized tool calls (stream ended without finish_reason)
+  if (toolStream.size > 0) {
+    for (const [, pending] of toolStream) {
+      if (pending.input) {
+        try {
+          const parsed = JSON.parse(pending.input)
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            finalToolCalls.push({
+              toolCallId: pending.toolCallId,
+              toolName: pending.toolName,
+              args: parsed as Record<string, unknown>,
+            })
+          } else {
+            finalToolCalls.push({ toolCallId: pending.toolCallId, toolName: pending.toolName, args: {} })
+          }
+        } catch {
+          finalToolCalls.push({ toolCallId: pending.toolCallId, toolName: pending.toolName, args: {} })
+        }
+      } else {
+        finalToolCalls.push({
+          toolCallId: pending.toolCallId,
+          toolName: pending.toolName,
+          args: {},
+        })
+      }
+    }
+    toolStream.clear()
+  }
+
+  // Fallback: extract inline tool calls from text if no delta/non-delta tool calls were found
+  if (finalToolCalls.length === 0) {
     const inlineCalls = extractInlineToolCalls(collectedText)
-    collectedToolCalls.push(...inlineCalls)
+    finalToolCalls.push(...inlineCalls)
     if (inlineCalls.length > 0) {
-      // Strip inline JSON blocks from text but keep preamble (like opencode)
       collectedText = collectedText.replace(/```json[\s\S]*?```/g, "").trim()
     }
   }
 
-  return { text: collectedText, reasoning: collectedReasoning, toolCalls: collectedToolCalls as StreamResult["toolCalls"], usage }
+  return {
+    text: collectedText,
+    reasoning: collectedReasoning,
+    toolCalls: finalToolCalls,
+    finishReason,
+    usage,
+  }
 }
 
 export async function streamOpenAI(
@@ -141,5 +261,12 @@ export async function streamOpenAI(
   const reader = res.body?.getReader()
   if (!reader) throw new Error("No response body")
 
-  return await parseOpenAIStream(reader, signal ?? new AbortController().signal, callbacks)
+  const result = await parseOpenAIStream(reader, signal ?? new AbortController().signal, callbacks)
+  return {
+    text: result.text,
+    reasoning: result.reasoning,
+    toolCalls: result.toolCalls,
+    finishReason: result.finishReason,
+    usage: result.usage,
+  }
 }

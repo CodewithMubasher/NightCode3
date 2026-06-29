@@ -31,7 +31,13 @@ export const listDirectoryTool = {
   async execute(args: { path?: string }) {
     const resolved = resolvePath(args.path ?? ".")
     if (!fs.existsSync(resolved)) {
-      return { success: false, error: `Directory not found: ${args.path ?? "."}` }
+      const isAbs = path.isAbsolute(args.path ?? ".")
+      return {
+        success: false,
+        error: `Directory not found: ${args.path ?? "."}` +
+          (isAbs ? ` (absolute path resolved to: ${resolved})` : "") +
+          `. Try: 1) check the path is correct, 2) use list_directory with no args to see workspace root, 3) use an absolute path like F:/Projects/...`
+      }
     }
     const stat = fs.statSync(resolved)
     if (!stat.isDirectory()) {

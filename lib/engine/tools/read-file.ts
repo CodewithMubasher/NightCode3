@@ -22,7 +22,13 @@ export const readFileTool = {
   async execute(args: { path: string; offset?: number; limit?: number }) {
     const resolved = resolvePath(args.path)
     if (!fs.existsSync(resolved)) {
-      return { success: false, error: `File not found: ${args.path}` }
+      const isAbs = path.isAbsolute(args.path)
+      return {
+        success: false,
+        error: `File not found: ${args.path}` +
+          (isAbs ? ` (resolved to: ${resolved})` : "") +
+          `. Try: 1) check the path spelling, 2) use list_directory to find the correct file, 3) use an absolute path like F:/Projects/.../file.ts`
+      }
     }
 
     const stat = fs.statSync(resolved)

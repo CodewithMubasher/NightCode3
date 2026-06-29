@@ -46,6 +46,7 @@ export class Session {
   finishReason?: FinishReason
   usage?: Usage
   callbacks?: SessionCallbacks
+  suppressTextEmission = false
 
   // Internal tracking for in-flight parts
   private currentTextPart?: TextPart
@@ -179,7 +180,9 @@ export class Session {
     if (event.providerMetadata) {
       this.currentTextPart.providerMetadata = event.providerMetadata
     }
-    this.emit({ type: "text-delta", text: event.text })
+    if (!this.suppressTextEmission) {
+      this.emit({ type: "text-delta", text: event.text })
+    }
   }
 
   private handleTextEnd(_event: LLMEvent & { type: "text-end" }) {

@@ -69,7 +69,7 @@ export function AppSidebar() {
   const projects = useNightCodeStore((s) => s.projects)
 
   const recentChats = hydrated
-    ? [...chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 15)
+    ? [...chats].sort((a, b) => b.updatedAt - a.updatedAt)
     : []
 
   return (
@@ -81,8 +81,8 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarSeparator />
-      <SidebarContent className="mobile-sidebar-content">
-        <SidebarGroup>
+      <SidebarContent className="mobile-sidebar-content flex flex-col overflow-hidden">
+        <SidebarGroup className="shrink-0">
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -114,7 +114,7 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarSeparator />
-        <SidebarGroup>
+        <SidebarGroup className="shrink-0">
           <SidebarGroupLabel>Projects</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -142,9 +142,9 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarSeparator />
-        <SidebarGroup className="min-h-0 flex-1 overflow-y-auto">
-          <SidebarGroupLabel>Chats</SidebarGroupLabel>
-          <SidebarGroupContent>
+        <SidebarGroup className="min-h-0 flex-1 flex flex-col overflow-hidden">
+          <SidebarGroupLabel className="shrink-0">Chats</SidebarGroupLabel>
+          <SidebarGroupContent className="min-h-0 flex-1 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <SidebarMenu>
               {recentChats.map((chat) => {
                 const isMenuOpen = menuOpenChatId === chat.id

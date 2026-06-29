@@ -21,7 +21,8 @@ export interface GatewayCallbacks {
 export interface StreamResult {
   text: string
   reasoning: string
-  toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }>
+  toolCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> | null }>
+  finishReason?: string
   usage?: UsageInfo
 }
 
@@ -43,34 +44,91 @@ export function getTemperature(modelId: string): number | undefined {
   return 0.3
 }
 
+/**
+ * Convert a single schema value (simple type string or Zod type) into a JSON Schema property.
+ */
+export function schemaValueToJsonSchema(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && "_def" in value) {
+    // Zod schema — extract type from Zod's internal representation
+    const def = (value as any)._def
+    const typeName = def?.typeName
+    switch (typeName) {
+      case "ZodString": return { type: "string" }
+      case "ZodNumber": return { type: "number" }
+      case "ZodBoolean": return { type: "boolean" }
+      case "ZodArray": return { type: "array", items: schemaValueToJsonSchema(def.type) }
+      case "ZodEnum": {
+        const values: string[] | undefined = def.values
+        return { type: "string", enum: values }
+      }
+      case "ZodOptional":
+        return { ...schemaValueToJsonSchema(def.innerType), optional: true }
+      case "ZodNullable":
+        return { ...schemaValueToJsonSchema(def.innerType), nullable: true }
+      case "ZodDefault":
+        return schemaValueToJsonSchema(def.innerType)
+      default:
+        return { type: "string" }
+    }
+  }
+
+  const typeStr = String(value)
+  const isOptional = typeStr.endsWith("?")
+  const baseType = isOptional ? typeStr.slice(0, -1).trim() : typeStr.trim()
+
+  let tsType: string
+  let items: Record<string, unknown> | undefined
+
+  switch (baseType) {
+    case "number": tsType = "number"; break
+    case "boolean": tsType = "boolean"; break
+    case "string[]": tsType = "array"; items = { type: "string" }; break
+    case "number[]": tsType = "array"; items = { type: "number" }; break
+    case "object": tsType = "object"; break
+    default: tsType = "string"
+  }
+
+  const result: Record<string, unknown> = { type: tsType }
+  if (items) result.items = items
+  if (isOptional) result.optional = true
+  return result
+}
+
 export function buildToolsArray(tools: ToolDef[]): unknown[] {
-  return tools.map((t) => ({
-    type: "function" as const,
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: {
-        type: "object",
-        properties: Object.entries(t.schema).reduce((acc, [key, type]) => {
-          const isOptional = typeof type === "string" && type.endsWith("?")
-          const baseType = typeof type === "string" ? type.replace("?", "").trim() : "string"
-          let tsType: string
-          switch (baseType) {
-            case "number": tsType = "number"; break
-            case "boolean": tsType = "boolean"; break
-            case "string[]": tsType = "array"; break
-            default: tsType = "string"
-          }
-          acc[key] = { type: tsType, description: typeof type === "string" ? type : "parameter" }
-          if (isOptional) acc[key].optional = true
-          return acc
-        }, {} as Record<string, any>),
-        required: Object.entries(t.schema)
-          .filter(([, type]) => !(typeof type === "string" && type.endsWith("?")))
-          .map(([key]) => key),
+  return tools.map((t) => {
+    const entries = Object.entries(t.schema)
+    const properties: Record<string, unknown> = {}
+    const required: string[] = []
+
+    for (const [key, value] of entries) {
+      const prop = schemaValueToJsonSchema(value)
+      properties[key] = prop
+
+      // Determine if optional: check both our convention and Zod Optional
+      const isOptional =
+        (typeof value === "string" && value.endsWith("?")) ||
+        (value && typeof value === "object" && "_def" in value &&
+          ((value as any)._def?.typeName === "ZodOptional" || (value as any)._def?.typeName === "ZodNullable" || (value as any)._def?.typeName === "ZodDefault"))
+
+      if (!isOptional) {
+        required.push(key)
+      }
+    }
+
+    return {
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: {
+          type: "object",
+          properties,
+          required: required.length > 0 ? required : undefined,
+          additionalProperties: false,
+        },
       },
-    },
-  }))
+    }
+  })
 }
 
 export function getModelParam(provider: string, model: string): string {
