@@ -35,16 +35,16 @@ export function WelcomeScreen() {
             <span className="sm:hidden inline-flex flex-col items-center gap-1">
               <span className="flex items-center gap-2">
                 <Eclipse size={28} style={{ color: "var(--primary-color)" }} />
-                <span>Hey Mubasher,</span>
+                <span>Hey there,</span>
               </span>
               <span className="text-foreground/70">Ready to dive in?</span>
             </span>
             <span className="hidden sm:inline">
               {shimmerDone ? (
-                "Hey, Mubasher. Ready to dive in?"
+                "Hey there. Ready to dive in?"
               ) : (
                 <Shimmer as="span" duration={1.2} spread={2}>
-                  Hey, Mubasher. Ready to dive in?
+                  Hey there. Ready to dive in?
                 </Shimmer>
               )}
             </span>
